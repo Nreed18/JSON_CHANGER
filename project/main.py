@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from datetime import datetime
@@ -15,6 +16,7 @@ import requests
 import secrets
 
 app = FastAPI()
+templates = Jinja2Templates(directory="project/templates")
 security = HTTPBasic()
 
 USERNAME = "admin"
@@ -223,8 +225,8 @@ async def feed_worship(request: Request):
     data = await fetch_tracks(SOURCE_THIRD)
     return JSONResponse({"nowPlaying": await to_spec_format(data)})
 
-@app.get("/admin/dashboard")
-async def admin_dashboard():
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     async def get_feed_metrics(feed):
@@ -278,7 +280,7 @@ async def admin_dashboard():
     last_feed_check_west = await rdb.get('last_feed_check:west')
     last_feed_check_worship = await rdb.get('last_feed_check:worship')
 
-    return {
+    metrics_dict = {
         "timestamp": now,
         "feeds": metrics,
         "cache": {
@@ -300,6 +302,11 @@ async def admin_dashboard():
         "last_feed_check_west": last_feed_check_west,
         "last_feed_check_worship": last_feed_check_worship
     }
+
+    return templates.TemplateResponse(
+        "admin_dashboard.html",
+        {"request": request, "metrics": metrics_dict}
+    )
 
 @app.get("/admin/test-alert")
 async def trigger_test_alert(credentials: HTTPBasicCredentials = Depends(security)):

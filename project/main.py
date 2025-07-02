@@ -247,10 +247,6 @@ async def feed_fifth(request: Request):
     await increment_metrics("fifth", client_id)
     data = await fetch_tracks(SOURCE_FIFTH)
     return JSONResponse({"nowPlaying": await to_spec_format(data)})
-
-@app.get("/admin/dashboard")
-async def admin_dashboard():
-
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
 

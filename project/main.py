@@ -10,6 +10,7 @@ import httpx
 import asyncio
 import json
 import logging
+import os
 import redis.asyncio as redis
 import hashlib
 import requests
@@ -19,8 +20,9 @@ app = FastAPI()
 templates = Jinja2Templates(directory="project/templates")
 security = HTTPBasic()
 
-USERNAME = "admin"
-PASSWORD = "familyradio2025"
+USERNAME = os.getenv("ADMIN_USER", "admin")
+PASSWORD = os.getenv("ADMIN_PASSWORD", "familyradio2025")
+PAGERDUTY_KEY = os.getenv("PD_ROUTING_KEY", "be2800efd3ac410fc05d30cea86764f9")
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -32,7 +34,9 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-rdb = redis.Redis(host="localhost", port=6379, decode_responses=True)
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+rdb = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
@@ -316,7 +320,7 @@ async def trigger_test_alert(credentials: HTTPBasicCredentials = Depends(securit
     ):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
-    pagerduty_key = "be2800efd3ac410fc05d30cea86764f9"
+    pagerduty_key = PAGERDUTY_KEY
     payload = {
         "routing_key": pagerduty_key,
         "event_action": "trigger",

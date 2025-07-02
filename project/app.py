@@ -30,14 +30,18 @@ HTML_TEMPLATE = '''
   <a class="button" href="/east-feed.json" target="_blank">East Feed (WFME)</a>
   <a class="button" href="/west-feed.json" target="_blank">West Feed (KEAR)</a>
   <a class="button" href="/worship-feed.json" target="_blank">Worship Feed</a>
+  <a class="button" href="/fourth-feed.json" target="_blank">Fourth Feed</a>
+  <a class="button" href="/fifth-feed.json" target="_blank">Fifth Feed</a>
 </body>
 </html>
 '''
 
 # Upstream sources
-SOURCE_EAST  = "https://yp.cdnstream1.com/metadata/2632_128/last/12.json"
-SOURCE_WEST  = "https://yp.cdnstream1.com/metadata/2638_128/last/12.json"
-SOURCE_THIRD = "https://yp.cdnstream1.com/metadata/2878_128/last/12.json"
+SOURCE_EAST   = "https://yp.cdnstream1.com/metadata/2632_128/last/12.json"
+SOURCE_WEST   = "https://yp.cdnstream1.com/metadata/2638_128/last/12.json"
+SOURCE_THIRD  = "https://yp.cdnstream1.com/metadata/2878_128/last/12.json"
+SOURCE_FOURTH = ""  # TODO: update with real URL
+SOURCE_FIFTH  = ""  # TODO: update with real URL
 
 def fetch_tracks(source_url):
     try:
@@ -110,6 +114,16 @@ def feed_west():
 @app.route("/worship-feed.json")
 def feed_worship():
     data = fetch_tracks(SOURCE_THIRD)
+    return jsonify({"nowPlaying": to_spec_format(data)})
+
+@app.route("/fourth-feed.json")
+def feed_fourth():
+    data = fetch_tracks(SOURCE_FOURTH)
+    return jsonify({"nowPlaying": to_spec_format(data)})
+
+@app.route("/fifth-feed.json")
+def feed_fifth():
+    data = fetch_tracks(SOURCE_FIFTH)
     return jsonify({"nowPlaying": to_spec_format(data)})
 
 if __name__ == "__main__":

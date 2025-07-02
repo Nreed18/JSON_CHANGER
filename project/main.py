@@ -54,6 +54,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <a class="button" href="/east-feed.json" target="_blank">East Feed (WFME)</a>
   <a class="button" href="/west-feed.json" target="_blank">West Feed (KEAR)</a>
   <a class="button" href="/worship-feed.json" target="_blank">Worship Feed</a>
+  <a class="button" href="/fourth-feed.json" target="_blank">Fourth Feed</a>
+  <a class="button" href="/fifth-feed.json" target="_blank">Fifth Feed</a>
   <br><br>
   <a class="button admin-button" href="/admin/dashboard" target="_blank">📊 Admin Dashboard</a>
   <form action="/admin/test-alert" method="get" target="_blank" style="margin-top: 2rem;">
@@ -62,9 +64,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </body>
 </html>"""
 
-SOURCE_EAST = "https://yp.cdnstream1.com/metadata/2632_128/last/12.json"
-SOURCE_WEST = "https://yp.cdnstream1.com/metadata/2638_128/last/12.json"
-SOURCE_THIRD = "https://yp.cdnstream1.com/metadata/2878_128/last/12.json"
+SOURCE_EAST   = "https://yp.cdnstream1.com/metadata/2632_128/last/12.json"
+SOURCE_WEST   = "https://yp.cdnstream1.com/metadata/2638_128/last/12.json"
+SOURCE_THIRD  = "https://yp.cdnstream1.com/metadata/2878_128/last/12.json"
+SOURCE_FOURTH = ""  # TODO: update with real URL
+SOURCE_FIFTH  = ""  # TODO: update with real URL
 
 def hash_key(artist: str, title: str) -> str:
     return hashlib.sha1(f"{artist.lower()}|{title.lower()}".encode()).hexdigest()
@@ -223,6 +227,20 @@ async def feed_worship(request: Request):
     data = await fetch_tracks(SOURCE_THIRD)
     return JSONResponse({"nowPlaying": await to_spec_format(data)})
 
+@app.get("/fourth-feed.json")
+async def feed_fourth(request: Request):
+    client_id = get_client_id(request)
+    await increment_metrics("fourth", client_id)
+    data = await fetch_tracks(SOURCE_FOURTH)
+    return JSONResponse({"nowPlaying": await to_spec_format(data)})
+
+@app.get("/fifth-feed.json")
+async def feed_fifth(request: Request):
+    client_id = get_client_id(request)
+    await increment_metrics("fifth", client_id)
+    data = await fetch_tracks(SOURCE_FIFTH)
+    return JSONResponse({"nowPlaying": await to_spec_format(data)})
+
 @app.get("/admin/dashboard")
 async def admin_dashboard():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -249,8 +267,14 @@ async def admin_dashboard():
         except Exception:
             return (False, [])
 
-    feeds = ["east", "west", "worship"]
-    feed_urls = [SOURCE_EAST, SOURCE_WEST, SOURCE_THIRD]
+    feeds = ["east", "west", "worship", "fourth", "fifth"]
+    feed_urls = [
+        SOURCE_EAST,
+        SOURCE_WEST,
+        SOURCE_THIRD,
+        SOURCE_FOURTH,
+        SOURCE_FIFTH,
+    ]
     metrics = await asyncio.gather(*(get_feed_metrics(f) for f in feeds))
     health_checks = await asyncio.gather(*(feed_health(url) for url in feed_urls))
 
@@ -277,6 +301,8 @@ async def admin_dashboard():
     last_feed_check_east = await rdb.get('last_feed_check:east')
     last_feed_check_west = await rdb.get('last_feed_check:west')
     last_feed_check_worship = await rdb.get('last_feed_check:worship')
+    last_feed_check_fourth = await rdb.get('last_feed_check:fourth')
+    last_feed_check_fifth = await rdb.get('last_feed_check:fifth')
 
     return {
         "timestamp": now,
@@ -298,7 +324,9 @@ async def admin_dashboard():
         "last_feed_check": last_feed_check,
         "last_feed_check_east": last_feed_check_east,
         "last_feed_check_west": last_feed_check_west,
-        "last_feed_check_worship": last_feed_check_worship
+        "last_feed_check_worship": last_feed_check_worship,
+        "last_feed_check_fourth": last_feed_check_fourth,
+        "last_feed_check_fifth": last_feed_check_fifth
     }
 
 @app.get("/admin/test-alert")

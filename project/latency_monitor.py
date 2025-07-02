@@ -16,7 +16,7 @@ FEEDS = {
 def send_pagerduty_alert(feed_name, latency):
     summary = f"🚨 {feed_name.capitalize()} metadata feed response time error ({latency:.2f}s)"
     payload = {
-        "routing_key": be2800efd3ac410fc05d30cea86764f9,
+        "routing_key": PAGERDUTY_KEY,
         "event_action": "trigger",
         "payload": {
             "summary": summary,

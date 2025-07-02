@@ -2,7 +2,7 @@ import requests
 import time
 import os
 
-PAGERDUTY_KEY = os.getenv("PD_ROUTING_KEY")
+PAGERDUTY_KEY = os.getenv("PD_ROUTING_KEY", "")
 ALERT_THRESHOLD = 10  # seconds
 
 FEEDS = {
@@ -17,6 +17,9 @@ def send_pagerduty_alert(feed_name, latency):
     summary = f"🚨 {feed_name.capitalize()} metadata feed response time error ({latency:.2f}s)"
     payload = {
         "routing_key": PAGERDUTY_KEY,
+
+        "routing_key": f"{PAGERDUTY_KEY}",
+
         "event_action": "trigger",
         "payload": {
             "summary": summary,

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from datetime import datetime
@@ -9,16 +10,19 @@ import httpx
 import asyncio
 import json
 import logging
+import os
 import redis.asyncio as redis
 import hashlib
 import requests
 import secrets
 
 app = FastAPI()
+templates = Jinja2Templates(directory="project/templates")
 security = HTTPBasic()
 
-USERNAME = "admin"
-PASSWORD = "familyradio2025"
+USERNAME = os.getenv("ADMIN_USER", "admin")
+PASSWORD = os.getenv("ADMIN_PASSWORD", "familyradio2025")
+PAGERDUTY_KEY = os.getenv("PD_ROUTING_KEY", "be2800efd3ac410fc05d30cea86764f9")
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -30,7 +34,9 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-rdb = redis.Redis(host="localhost", port=6379, decode_responses=True)
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+rdb = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
@@ -227,6 +233,7 @@ async def feed_worship(request: Request):
     data = await fetch_tracks(SOURCE_THIRD)
     return JSONResponse({"nowPlaying": await to_spec_format(data)})
 
+
 @app.get("/fourth-feed.json")
 async def feed_fourth(request: Request):
     client_id = get_client_id(request)
@@ -243,6 +250,10 @@ async def feed_fifth(request: Request):
 
 @app.get("/admin/dashboard")
 async def admin_dashboard():
+
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     async def get_feed_metrics(feed):
@@ -304,7 +315,7 @@ async def admin_dashboard():
     last_feed_check_fourth = await rdb.get('last_feed_check:fourth')
     last_feed_check_fifth = await rdb.get('last_feed_check:fifth')
 
-    return {
+    metrics_dict = {
         "timestamp": now,
         "feeds": metrics,
         "cache": {
@@ -329,6 +340,11 @@ async def admin_dashboard():
         "last_feed_check_fifth": last_feed_check_fifth
     }
 
+    return templates.TemplateResponse(
+        "admin_dashboard.html",
+        {"request": request, "metrics": metrics_dict}
+    )
+
 @app.get("/admin/test-alert")
 async def trigger_test_alert(credentials: HTTPBasicCredentials = Depends(security)):
     if not (
@@ -337,7 +353,7 @@ async def trigger_test_alert(credentials: HTTPBasicCredentials = Depends(securit
     ):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
-    pagerduty_key = "be2800efd3ac410fc05d30cea86764f9"
+    pagerduty_key = PAGERDUTY_KEY
     payload = {
         "routing_key": pagerduty_key,
         "event_action": "trigger",

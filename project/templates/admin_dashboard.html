@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Admin Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; }
+        .buttons a, .buttons form { margin-right: 1rem; display: inline-block; }
+        .buttons form button { padding: 0.5rem 1rem; }
+        pre { background: #f4f4f4; padding: 1rem; }
+    </style>
+</head>
+<body>
+    <h1>Admin Dashboard</h1>
+    <div class="buttons">
+        <a href="{{ url_for('feed_east') }}" target="_blank">East Feed</a>
+        <a href="{{ url_for('feed_west') }}" target="_blank">West Feed</a>
+        <a href="{{ url_for('feed_worship') }}" target="_blank">Worship Feed</a>
+        <form action="{{ url_for('trigger_test_alert') }}" method="get" target="_blank">
+            <button>Send Test Alert</button>
+        </form>
+    </div>
+    <h2>Metrics</h2>
+    <pre>{{ metrics | tojson(indent=2) }}</pre>
+</body>
+</html>

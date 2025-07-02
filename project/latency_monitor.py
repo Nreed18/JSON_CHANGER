@@ -8,7 +8,9 @@ ALERT_THRESHOLD = 10  # seconds
 FEEDS = {
     "east": "https://metadata.fr-infra.com/east-feed.json",
     "west": "https://metadata.fr-infra.com/west-feed.json",
-    "worship": "https://metadata.fr-infra.com/worship-feed.json"
+    "worship": "https://metadata.fr-infra.com/worship-feed.json",
+    "fourth": "https://metadata.fr-infra.com/fourth-feed.json",
+    "fifth": "https://metadata.fr-infra.com/fifth-feed.json"
 }
 
 def send_pagerduty_alert(feed_name, latency):

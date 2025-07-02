@@ -1,0 +1,10 @@
+# Example Cloudflared configuration
+# Replace 'YOUR_TUNNEL_ID' and 'PATH_TO_CREDENTIALS_JSON'
+# with values from your Cloudflare account.
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /etc/cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: example.com
+    service: http://localhost:8000
+  - service: http_status:404

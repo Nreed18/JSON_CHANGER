@@ -7,7 +7,7 @@ This project exposes JSON metadata feeds via a FastAPI app and provides a simple
 1. Install dependencies:
 
 ```bash
-pip install -r project/requirements.txt
+pip install -r requirements.txt
 ```
 
 2. Set environment variables (adjust as needed):
@@ -19,7 +19,7 @@ pip install -r project/requirements.txt
 3. Run the application:
 
 ```bash
-uvicorn project.main:app
+uvicorn main:app
 ```
 
 The app will start on port 8000 by default. You can add the `--reload` flag during development.
@@ -41,24 +41,24 @@ sudo systemctl enable --now redis-server
 ```bash
 git clone <REPO_URL>
 cd JSON_CHANGER
-pip3 install -r project/requirements.txt
+pip3 install -r requirements.txt
 ```
 
 3. Set the environment variables listed below (at minimum `PD_ROUTING_KEY`) and start the FastAPI server:
 
 ```bash
-uvicorn project.main:app
+uvicorn main:app
 ```
 
 You can also set up the Cloudflare tunnel as described in the next section to expose the service publicly.
 
 ## Admin Dashboard
 
-Navigate to `/admin/dashboard` to view feed metrics, cache statistics, and the overall health status of each feed. Authentication is handled by HTTP basic auth using the credentials defined in `project/main.py` (`USERNAME` and `PASSWORD`).
+Navigate to `/admin/dashboard` to view feed metrics, cache statistics, and the overall health status of each feed. Authentication is handled by HTTP basic auth using the credentials defined in `main.py` (`USERNAME` and `PASSWORD`).
 
 ## Configuring Feeds
 
-Feed URLs are defined as constants (`SOURCE_EAST`, `SOURCE_WEST`, `SOURCE_THIRD`, etc.) in `project/main.py`. To add a new feed, create an additional constant and extend the endpoints accordingly. Update the `FEEDS` dictionary in `project/latency_monitor.py` so the latency monitor checks the new feed as well.
+Feed URLs are defined as constants (`SOURCE_EAST`, `SOURCE_WEST`, `SOURCE_THIRD`, etc.) in `main.py`. To add a new feed, create an additional constant and extend the endpoints accordingly. Update the `FEEDS` dictionary in `latency_monitor.py` so the latency monitor checks the new feed as well.
 
 ## Cloudflared Tunnel Setup
 

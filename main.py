@@ -17,7 +17,7 @@ import requests
 import secrets
 
 app = FastAPI()
-templates = Jinja2Templates(directory="project/templates")
+templates = Jinja2Templates(directory="templates")
 security = HTTPBasic()
 
 USERNAME = os.getenv("ADMIN_USER", "admin")

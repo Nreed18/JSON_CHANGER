@@ -4,4 +4,4 @@ requests
 pytz
 httpx
 redis
-jinja
+jinja2

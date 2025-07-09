@@ -10,9 +10,11 @@ This project exposes JSON metadata feeds via a FastAPI app and provides a simple
 pip install -r project/requirements.txt
 ```
 
-2. Set environment variables:
+2. Set environment variables (adjust as needed):
 
 - `PD_ROUTING_KEY` – PagerDuty routing key used by `latency_monitor.py` when it sends alerts.
+- `ADMIN_USER` and `ADMIN_PASSWORD` – credentials for accessing the dashboard (default: `admin`/`familyradio2025`).
+- `REDIS_HOST` and `REDIS_PORT` – connection info for your Redis instance (defaults to `localhost` and `6379`).
 
 3. Run the application:
 
@@ -21,6 +23,34 @@ uvicorn project.main:app
 ```
 
 The app will start on port 8000 by default. You can add the `--reload` flag during development.
+
+## Ubuntu Quickstart
+
+Follow these steps on a clean Ubuntu install to get the application running:
+
+1. Install system packages and start Redis:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip git redis-server
+sudo systemctl enable --now redis-server
+```
+
+2. Clone this repository and install the Python dependencies:
+
+```bash
+git clone <REPO_URL>
+cd JSON_CHANGER
+pip3 install -r project/requirements.txt
+```
+
+3. Set the environment variables listed below (at minimum `PD_ROUTING_KEY`) and start the FastAPI server:
+
+```bash
+uvicorn project.main:app
+```
+
+You can also set up the Cloudflare tunnel as described in the next section to expose the service publicly.
 
 ## Admin Dashboard
 

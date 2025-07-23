@@ -4,10 +4,21 @@ This project exposes JSON metadata feeds via a FastAPI app and provides a simple
 
 ## Setup
 
-1. Install dependencies:
+The instructions below assume a fresh Ubuntu installation. Begin by installing
+system packages and cloning this repository:
 
 ```bash
-pip install -r requirements.txt
+sudo apt update
+sudo apt install -y python3 python3-pip git redis-server
+sudo systemctl enable --now redis-server
+git clone <REPO_URL>
+cd JSON_CHANGER
+```
+
+1. Install Python dependencies:
+
+```bash
+pip3 install -r requirements.txt
 ```
 
 2. Set environment variables (adjust as needed):
@@ -64,11 +75,13 @@ Feed URLs are defined as constants (`SOURCE_EAST`, `SOURCE_WEST`, `SOURCE_THIRD`
 
 To expose the FastAPI service through a secure Cloudflare Tunnel, install `cloudflared` and configure it as a systemd service. These steps work on any Ubuntu-based distribution.
 
-1. Install the package:
+1. Install the package using Cloudflare's apt repository:
 
 ```bash
-sudo apt update
-sudo apt install cloudflared
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install cloudflared
 ```
 
 2. Authenticate and create a tunnel (or reuse an existing one):

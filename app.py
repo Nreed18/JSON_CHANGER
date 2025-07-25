@@ -94,8 +94,12 @@ def to_spec_format(raw_tracks):
         artist = t.get("TPE1", "Family Radio")
         title = t.get("TIT2", "")
         album = t.get("TALB", title)
-        start = t.get("start_time", datetime.now().timestamp())
-        ts_dt = datetime.fromtimestamp(float(start), tz=central)
+        played_on = (
+            t.get("played_on")
+            or t.get("last_seen")
+            or datetime.now().timestamp()
+        )
+        ts_dt = datetime.fromtimestamp(float(played_on), tz=central)
 
         if is_family_radio(artist, title):
             meta = EMPTY_META
@@ -114,7 +118,7 @@ def to_spec_format(raw_tracks):
             "duration": t.get("duration", "00:03:00"),
             "status": "history",
             "type": "song",
-            "_ts": float(start),
+            "_ts": float(played_on),
         })
 
     out.sort(key=lambda x: x["_ts"], reverse=True)

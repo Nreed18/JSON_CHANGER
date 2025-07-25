@@ -90,7 +90,10 @@ def to_spec_format(raw_tracks):
         album  = t.get("TALB", title)
         start  = t.get("start_time", datetime.now().timestamp())
         ts     = datetime.fromtimestamp(start, tz=central).isoformat()
-        meta   = lookup_album_art(artist, album)
+        if "family radio" in artist.lower() or "family radio" in title.lower():
+            meta = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+        else:
+            meta = lookup_album_art(artist, album)
         out.append({
             "id": str(uuid.uuid4()),
             "artist": artist,

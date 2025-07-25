@@ -17,6 +17,7 @@ This will install [SACAD](https://github.com/desbma/sacad) for album art search.
 - `PD_ROUTING_KEY` – PagerDuty routing key used by `latency_monitor.py` when it sends alerts.
 - `ADMIN_USER` and `ADMIN_PASSWORD` – credentials for accessing the dashboard (default: `admin`/`familyradio2025`).
 - `REDIS_HOST` and `REDIS_PORT` – connection info for your Redis instance (defaults to `localhost` and `6379`).
+- `ALBUM_LOOKUP_CSV` – optional path to a CSV file mapping track `title` and `artist` to an `album` name used for SACAD album art searches. Defaults to `album_lookup.csv` in the project root.
 
 3. Run the application:
 
@@ -25,6 +26,20 @@ uvicorn main:app
 ```
 
 The app will start on port 8000 by default. You can add the `--reload` flag during development.
+
+## Album Lookup CSV
+
+To improve album art accuracy you can provide a CSV file with `title`, `artist`, and `album` columns. When a matching row is found, the album name from the CSV is used for SACAD searches.
+
+1. Create a CSV file named `album_lookup.csv` in the project root (or set the `ALBUM_LOOKUP_CSV` environment variable to another location).
+2. Each row should contain `title`, `artist`, and `album` headers, for example:
+
+   ```csv
+   title,artist,album
+   Awesome Song,Example Artist,Greatest Hits
+   ```
+
+3. Restart the application so the file is loaded on startup.
 
 ## Ubuntu Quickstart
 

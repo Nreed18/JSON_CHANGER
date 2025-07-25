@@ -100,6 +100,17 @@ def to_spec_format(raw_tracks):
             meta = EMPTY_META
         else:
             meta = lookup_album_art(artist, album)
+
+        if "family radio" in artist.lower() or "family radio" in title.lower():
+            meta = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+        else:
+            meta = lookup_album_art(artist, album)
+
+        if artist.strip().lower() == "family radio" or title.strip().lower() == "family radio":
+            meta = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+        else:
+            meta   = lookup_album_art(artist, album)
+
         out.append({
             "id": str(uuid.uuid4()),
             "artist": artist,

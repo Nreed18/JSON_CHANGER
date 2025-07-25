@@ -15,6 +15,10 @@ import redis.asyncio as redis
 import hashlib
 import requests
 import secrets
+import base64
+import tempfile
+import sacad
+from sacad.cover import CoverImageFormat
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -134,50 +138,51 @@ async def fetch_tracks(source_url, ttl=30):
         logging.error(f"[ERROR] Fetch failed: {e}")
         return []
 
-async def lookup_itunes(artist, title, ttl=300, fail_limit=3):
-    hashed = hash_key(artist, title)
-    key = f"itunes:{hashed}"
+async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
+    hashed = hash_key(artist, album)
+    key = f"cover:{hashed}"
     fail_key = f"fail:{hashed}"
     fails = await rdb.get(fail_key)
     if fails and int(fails) >= fail_limit:
         return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
     cached = await rdb.get(key)
     if cached:
-        await increment_cache_counter("itunes", "hit")
+        await increment_cache_counter("cover", "hit")
         return json.loads(cached)
-    await increment_cache_counter("itunes", "miss")
-    query = f"{artist} {title}"
-    url = "https://itunes.apple.com/search"
-    params = {"term": query, "limit": 1}
+    await increment_cache_counter("cover", "miss")
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            r = await client.get(url, params=params)
-            r.raise_for_status()
-            results = r.json().get("results", [])
-            if results:
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
+            success = await sacad.search_and_download(
+                album,
+                artist,
+                CoverImageFormat.JPEG,
+                450,
+                tmp.name,
+                size_tolerance_prct=25,
+            )
+            if success:
+                with open(tmp.name, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode()
                 meta = {
-                    "imageUrl": results[0].get("artworkUrl100", "").replace("100x100", "450x450"),
-                    "itunesTrackUrl": results[0].get("trackViewUrl", ""),
-                    "previewUrl": results[0].get("previewUrl", "")
+                    "imageUrl": f"data:image/jpeg;base64,{img_b64}",
+                    "itunesTrackUrl": "",
+                    "previewUrl": "",
                 }
                 await rdb.set(key, json.dumps(meta), ex=ttl)
                 return meta
-            else:
-                await rdb.incr(fail_key)
-                await rdb.expire(fail_key, 86400)
-                return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
-    except Exception:
-        await rdb.incr(fail_key)
-        await rdb.expire(fail_key, 86400)
-        return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+    except Exception as e:
+        logging.error(f"[ERROR] SACAD lookup failed: {e}")
+    await rdb.incr(fail_key)
+    await rdb.expire(fail_key, 86400)
+    return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
 async def to_spec_format(raw_tracks):
     central = timezone("America/Chicago")
     tasks = []
     for t in raw_tracks:
         artist = t.get("TPE1", "Family Radio")
-        title = t.get("TIT2", "")
-        tasks.append(lookup_itunes(artist, title))
+        album = t.get("TALB", t.get("TIT2", ""))
+        tasks.append(lookup_album_art(artist, album))
     metadatas = await asyncio.gather(*tasks)
     formatted = []
     for idx, (t, meta) in enumerate(zip(raw_tracks, metadatas)):
@@ -296,12 +301,12 @@ async def admin_dashboard(request: Request):
             status_map[name] = "ok"
 
     cache_feed_keys = await rdb.keys("feed:*")
-    cache_itunes_keys = await rdb.keys("itunes:*")
+    cache_cover_keys = await rdb.keys("cover:*")
 
     cache_hit_feed = await rdb.get("metrics:cache:feed:hit") or 0
     cache_miss_feed = await rdb.get("metrics:cache:feed:miss") or 0
-    cache_hit_itunes = await rdb.get("metrics:cache:itunes:hit") or 0
-    cache_miss_itunes = await rdb.get("metrics:cache:itunes:miss") or 0
+    cache_hit_cover = await rdb.get("metrics:cache:cover:hit") or 0
+    cache_miss_cover = await rdb.get("metrics:cache:cover:miss") or 0
 
     # Include last check times
     last_feed_check = await rdb.get('last_feed_check')
@@ -316,14 +321,14 @@ async def admin_dashboard(request: Request):
         "feeds": metrics,
         "cache": {
             "feed_keys": len(cache_feed_keys),
-            "itunes_keys": len(cache_itunes_keys),
+            "cover_keys": len(cache_cover_keys),
             "hits": {
                 "feed": int(cache_hit_feed),
-                "itunes": int(cache_hit_itunes),
+                "cover": int(cache_hit_cover),
             },
             "misses": {
                 "feed": int(cache_miss_feed),
-                "itunes": int(cache_miss_itunes),
+                "cover": int(cache_miss_cover),
             }
         },
         "status": overall_status,

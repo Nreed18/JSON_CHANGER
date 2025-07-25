@@ -4,6 +4,11 @@ import requests
 import uuid
 from datetime import datetime
 from pytz import timezone
+import base64
+import tempfile
+import asyncio
+import sacad
+from sacad.cover import CoverImageFormat
 
 app = Flask(__name__)
 CORS(app)
@@ -52,24 +57,29 @@ def fetch_tracks(source_url):
         print(f"[ERROR] Fetch failed for {source_url}: {e}")
         return []
 
-def lookup_itunes(artist, title):
-    # same as before...
+def lookup_album_art(artist, album):
     try:
-        query = f"{artist} {title}"
-        url = "https://itunes.apple.com/search"
-        params = {"term": query, "limit": 1}
-        resp = requests.get(url, params=params)
-        results = resp.json().get("results", [])
-        if results:
-            item = results[0]
-            return {
-                "imageUrl": item.get("artworkUrl100", "").replace("100x100", "450x450"),
-                "itunesTrackUrl": item.get("trackViewUrl", ""),
-                "previewUrl": item.get("previewUrl", "")
-            }
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success = loop.run_until_complete(
+                sacad.search_and_download(
+                    album,
+                    artist,
+                    CoverImageFormat.JPEG,
+                    450,
+                    tmp.name,
+                    size_tolerance_prct=25,
+                )
+            )
+            loop.close()
+            if success:
+                with open(tmp.name, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode()
+                return {"imageUrl": f"data:image/jpeg;base64,{img_b64}", "itunesTrackUrl": "", "previewUrl": ""}
     except Exception as e:
-        print(f"[WARN] iTunes lookup failed: {e}")
-    return {"imageUrl":"", "itunesTrackUrl":"", "previewUrl":""}
+        print(f"[WARN] SACAD lookup failed: {e}")
+    return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
 def to_spec_format(raw_tracks):
     central = timezone("America/Chicago")
@@ -77,9 +87,10 @@ def to_spec_format(raw_tracks):
     for idx, t in enumerate(raw_tracks):
         artist = t.get("TPE1","Family Radio")
         title  = t.get("TIT2","")
+        album  = t.get("TALB", title)
         start  = t.get("start_time", datetime.now().timestamp())
         ts     = datetime.fromtimestamp(start, tz=central).isoformat()
-        meta   = lookup_itunes(artist, title)
+        meta   = lookup_album_art(artist, album)
         out.append({
             "id": str(uuid.uuid4()),
             "artist": artist,

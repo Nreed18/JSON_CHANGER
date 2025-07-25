@@ -81,6 +81,12 @@ def lookup_album_art(artist, album):
         print(f"[WARN] SACAD lookup failed: {e}")
     return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
+EMPTY_META = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+
+def is_family_radio(artist: str, title: str) -> bool:
+    text = f"{artist} {title}".lower()
+    return "family radio" in text
+
 def to_spec_format(raw_tracks):
     central = timezone("America/Chicago")
     out = []
@@ -90,7 +96,10 @@ def to_spec_format(raw_tracks):
         album  = t.get("TALB", title)
         start  = t.get("start_time", datetime.now().timestamp())
         ts     = datetime.fromtimestamp(start, tz=central).isoformat()
-        meta   = lookup_album_art(artist, album)
+        if is_family_radio(artist, title):
+            meta = EMPTY_META
+        else:
+            meta = lookup_album_art(artist, album)
         out.append({
             "id": str(uuid.uuid4()),
             "artist": artist,

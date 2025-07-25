@@ -89,6 +89,12 @@ def get_csv_album(artist: str, title: str) -> str:
     """Return album from lookup CSV if present."""
     return album_lookup.get((artist.lower(), title.lower()), '')
 
+EMPTY_META = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+
+def is_family_radio(artist: str, title: str) -> bool:
+    text = f"{artist} {title}".lower()
+    return "family radio" in text
+
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
@@ -285,7 +291,10 @@ async def to_spec_format(raw_tracks):
         title = t.get("TIT2", "")
         album_csv = get_csv_album(artist, title)
         album = album_csv or t.get("TALB", title)
-        tasks.append(lookup_album_art(artist, album))
+        if is_family_radio(artist, title):
+            tasks.append(asyncio.sleep(0, result=EMPTY_META))
+        else:
+            tasks.append(lookup_album_art(artist, album))
     metadatas = await asyncio.gather(*tasks)
     formatted = []
     for idx, (t, meta) in enumerate(zip(raw_tracks, metadatas)):

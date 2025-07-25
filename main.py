@@ -325,12 +325,22 @@ async def to_spec_format(raw_tracks):
         })
 
     formatted.sort(key=lambda x: x["_ts"], reverse=True)
-    if formatted:
-        formatted[0]["status"] = "playing"
-    for f in formatted:
+
+    seen = set()
+    deduped = []
+    for item in formatted:
+        key = (item["artist"].lower().strip(), item["title"].lower().strip())
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+
+    if deduped:
+        deduped[0]["status"] = "playing"
+
+    for f in deduped:
         f.pop("_ts", None)
 
-    return formatted
+    return deduped
 
 def get_client_id(request: Request):
     return request.client.host

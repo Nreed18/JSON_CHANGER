@@ -10,6 +10,8 @@ This project exposes JSON metadata feeds via a FastAPI app and provides a simple
 pip install -r requirements.txt
 ```
 
+This will install [SACAD](https://github.com/desbma/sacad) for album art search.
+
 2. Set environment variables (adjust as needed):
 
 - `PD_ROUTING_KEY` – PagerDuty routing key used by `latency_monitor.py` when it sends alerts.

@@ -286,6 +286,7 @@ async def to_spec_format(raw_tracks):
         album_csv = get_csv_album(artist, title)
         album = album_csv or t.get("TALB", title)
         if "family radio" in artist.lower() or "family radio" in title.lower():
+        if artist.strip().lower() == "family radio" or title.strip().lower() == "family radio":
             tasks.append(asyncio.sleep(0, result={"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}))
         else:
             tasks.append(lookup_album_art(artist, album))

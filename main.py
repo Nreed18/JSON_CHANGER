@@ -297,7 +297,7 @@ async def to_spec_format(raw_tracks):
             tasks.append(lookup_album_art(artist, album))
     metadatas = await asyncio.gather(*tasks)
     formatted = []
-    for idx, (t, meta) in enumerate(zip(raw_tracks, metadatas)):
+    for t, meta in zip(raw_tracks, metadatas):
         artist = t.get("TPE1", "Family Radio")
         title = t.get("TIT2", "")
         album_csv = get_csv_album(artist, title)
@@ -319,12 +319,14 @@ async def to_spec_format(raw_tracks):
             "itunesTrackUrl": meta["itunesTrackUrl"],
             "previewUrl": meta["previewUrl"],
             "duration": t.get("duration", "00:03:00"),
-            "status": "playing" if idx == 0 else "history",
+            "status": "history",
             "type": "song",
             "_ts": float(played_on),
         })
 
     formatted.sort(key=lambda x: x["_ts"], reverse=True)
+    if formatted:
+        formatted[0]["status"] = "playing"
     for f in formatted:
         f.pop("_ts", None)
 

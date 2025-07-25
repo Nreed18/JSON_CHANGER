@@ -90,40 +90,39 @@ def is_family_radio(artist: str, title: str) -> bool:
 def to_spec_format(raw_tracks):
     central = timezone("America/Chicago")
     out = []
-    for idx, t in enumerate(raw_tracks):
-        artist = t.get("TPE1","Family Radio")
-        title  = t.get("TIT2","")
-        album  = t.get("TALB", title)
-        start  = t.get("start_time", datetime.now().timestamp())
-        ts     = datetime.fromtimestamp(start, tz=central).isoformat()
+    for t in raw_tracks:
+        artist = t.get("TPE1", "Family Radio")
+        title = t.get("TIT2", "")
+        album = t.get("TALB", title)
+        start = t.get("start_time", datetime.now().timestamp())
+        ts_dt = datetime.fromtimestamp(float(start), tz=central)
+
         if is_family_radio(artist, title):
             meta = EMPTY_META
         else:
             meta = lookup_album_art(artist, album)
 
-        if "family radio" in artist.lower() or "family radio" in title.lower():
-            meta = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
-        else:
-            meta = lookup_album_art(artist, album)
-
-        if artist.strip().lower() == "family radio" or title.strip().lower() == "family radio":
-            meta = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
-        else:
-            meta   = lookup_album_art(artist, album)
-
         out.append({
             "id": str(uuid.uuid4()),
             "artist": artist,
             "title": title,
-            "album": t.get("TALB",""),
-            "time": ts,
+            "album": t.get("TALB", ""),
+            "time": ts_dt.isoformat(),
             "imageUrl": meta["imageUrl"],
             "itunesTrackUrl": meta["itunesTrackUrl"],
             "previewUrl": meta["previewUrl"],
-            "duration": t.get("duration","00:03:00"),
-            "status": "playing" if idx==0 else "history",
-            "type": "song"
+            "duration": t.get("duration", "00:03:00"),
+            "status": "history",
+            "type": "song",
+            "_ts": float(start),
         })
+
+    out.sort(key=lambda x: x["_ts"], reverse=True)
+    if out:
+        out[0]["status"] = "playing"
+    for item in out:
+        item.pop("_ts", None)
+
     return out
 
 # -------------- ROUTES -----------------

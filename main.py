@@ -42,6 +42,20 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 rdb = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
+# Flag to indicate if Redis is available. If connection fails on startup the
+# application will still run but caching/metrics will be disabled.
+rdb_available = True
+
+@app.on_event("startup")
+async def check_redis_connection():
+    global rdb, rdb_available
+    try:
+        await rdb.ping()
+    except Exception as e:
+        logging.warning(f"Redis unavailable: {e}. Running without cache/metrics.")
+        rdb = None
+        rdb_available = False
+
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
@@ -106,6 +120,8 @@ def get_unique_keys(feed):
     }
 
 async def increment_metrics(feed, client_id):
+    if not rdb_available:
+        return
     keys = get_metrics_keys(feed)
     unique_keys = get_unique_keys(feed)
     pipe = rdb.pipeline()
@@ -117,12 +133,20 @@ async def increment_metrics(feed, client_id):
     await pipe.execute()
 
 async def increment_cache_counter(cache_type: str, status: str):
+    if not rdb_available:
+        return
     key = f"metrics:cache:{cache_type}:{status}"
     await rdb.incr(key)
 
 async def fetch_tracks(source_url, ttl=30):
     key = f"feed:{source_url}"
-    cached = await rdb.get(key)
+    if rdb_available:
+        try:
+            cached = await rdb.get(key)
+        except Exception:
+            cached = None
+    else:
+        cached = None
     if cached:
         await increment_cache_counter("feed", "hit")
         return json.loads(cached)
@@ -132,7 +156,11 @@ async def fetch_tracks(source_url, ttl=30):
             r = await client.get(source_url)
             r.raise_for_status()
             data = r.json()
-            await rdb.set(key, json.dumps(data), ex=ttl)
+            if rdb_available:
+                try:
+                    await rdb.set(key, json.dumps(data), ex=ttl)
+                except Exception:
+                    pass
             return data
     except Exception as e:
         logging.error(f"[ERROR] Fetch failed: {e}")
@@ -142,10 +170,20 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
     hashed = hash_key(artist, album)
     key = f"cover:{hashed}"
     fail_key = f"fail:{hashed}"
-    fails = await rdb.get(fail_key)
+    fails = None
+    if rdb_available:
+        try:
+            fails = await rdb.get(fail_key)
+        except Exception:
+            fails = None
     if fails and int(fails) >= fail_limit:
         return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
-    cached = await rdb.get(key)
+    cached = None
+    if rdb_available:
+        try:
+            cached = await rdb.get(key)
+        except Exception:
+            cached = None
     if cached:
         await increment_cache_counter("cover", "hit")
         return json.loads(cached)
@@ -168,12 +206,20 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
                     "itunesTrackUrl": "",
                     "previewUrl": "",
                 }
-                await rdb.set(key, json.dumps(meta), ex=ttl)
+                if rdb_available:
+                    try:
+                        await rdb.set(key, json.dumps(meta), ex=ttl)
+                    except Exception:
+                        pass
                 return meta
     except Exception as e:
         logging.error(f"[ERROR] SACAD lookup failed: {e}")
-    await rdb.incr(fail_key)
-    await rdb.expire(fail_key, 86400)
+    if rdb_available:
+        try:
+            await rdb.incr(fail_key)
+            await rdb.expire(fail_key, 86400)
+        except Exception:
+            pass
     return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
 async def to_spec_format(raw_tracks):
@@ -190,10 +236,20 @@ async def to_spec_format(raw_tracks):
         title = t.get("TIT2", "")
         track_id = hash_key(artist, title)
         cache_key = f"track_start:{track_id}"
-        start_ts = await rdb.get(cache_key)
+        if rdb_available:
+            try:
+                start_ts = await rdb.get(cache_key)
+            except Exception:
+                start_ts = None
+        else:
+            start_ts = None
         if start_ts is None:
             start_ts = str(datetime.now().timestamp())
-            await rdb.set(cache_key, start_ts, ex=600)
+            if rdb_available:
+                try:
+                    await rdb.set(cache_key, start_ts, ex=600)
+                except Exception:
+                    pass
         ts = datetime.fromtimestamp(float(start_ts), tz=central).isoformat()
         formatted.append({
             "id": str(uuid.uuid4()),
@@ -258,6 +314,13 @@ async def admin_dashboard(request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     async def get_feed_metrics(feed):
+        if not rdb_available:
+            periods = ["minute", "hour", "day", "week", "month", "year"]
+            return {
+                "feed": feed,
+                "total": {p: 0 for p in periods},
+                "unique": {p: 0 for p in periods},
+            }
         keys = get_metrics_keys(feed)
         unique_keys = get_unique_keys(feed)
         values = await rdb.mget(*list(keys.values()))
@@ -300,21 +363,40 @@ async def admin_dashboard(request: Request):
         else:
             status_map[name] = "ok"
 
-    cache_feed_keys = await rdb.keys("feed:*")
-    cache_cover_keys = await rdb.keys("cover:*")
+    if rdb_available:
+        try:
+            cache_feed_keys = await rdb.keys("feed:*")
+            cache_cover_keys = await rdb.keys("cover:*")
 
-    cache_hit_feed = await rdb.get("metrics:cache:feed:hit") or 0
-    cache_miss_feed = await rdb.get("metrics:cache:feed:miss") or 0
-    cache_hit_cover = await rdb.get("metrics:cache:cover:hit") or 0
-    cache_miss_cover = await rdb.get("metrics:cache:cover:miss") or 0
+            cache_hit_feed = await rdb.get("metrics:cache:feed:hit") or 0
+            cache_miss_feed = await rdb.get("metrics:cache:feed:miss") or 0
+            cache_hit_cover = await rdb.get("metrics:cache:cover:hit") or 0
+            cache_miss_cover = await rdb.get("metrics:cache:cover:miss") or 0
 
-    # Include last check times
-    last_feed_check = await rdb.get('last_feed_check')
-    last_feed_check_east = await rdb.get('last_feed_check:east')
-    last_feed_check_west = await rdb.get('last_feed_check:west')
-    last_feed_check_worship = await rdb.get('last_feed_check:worship')
-    last_feed_check_fourth = await rdb.get('last_feed_check:fourth')
-    last_feed_check_fifth = await rdb.get('last_feed_check:fifth')
+            # Include last check times
+            last_feed_check = await rdb.get('last_feed_check')
+            last_feed_check_east = await rdb.get('last_feed_check:east')
+            last_feed_check_west = await rdb.get('last_feed_check:west')
+            last_feed_check_worship = await rdb.get('last_feed_check:worship')
+            last_feed_check_fourth = await rdb.get('last_feed_check:fourth')
+            last_feed_check_fifth = await rdb.get('last_feed_check:fifth')
+        except Exception:
+            cache_feed_keys = []
+            cache_cover_keys = []
+            cache_hit_feed = cache_miss_feed = 0
+            cache_hit_cover = cache_miss_cover = 0
+            last_feed_check = last_feed_check_east = None
+            last_feed_check_west = last_feed_check_worship = None
+            last_feed_check_fourth = last_feed_check_fifth = None
+            logging.warning("Redis became unavailable during dashboard request")
+    else:
+        cache_feed_keys = []
+        cache_cover_keys = []
+        cache_hit_feed = cache_miss_feed = 0
+        cache_hit_cover = cache_miss_cover = 0
+        last_feed_check = last_feed_check_east = None
+        last_feed_check_west = last_feed_check_worship = None
+        last_feed_check_fourth = last_feed_check_fifth = None
 
     metrics_dict = {
         "timestamp": now,

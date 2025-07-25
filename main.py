@@ -220,6 +220,7 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
         if meta and not str(meta.get("imageUrl", "")).startswith("data:"):
             return meta
         # Discard old base64 cache and refetch
+        return json.loads(cached)
 
     await increment_cache_counter("cover", "miss")
     try:

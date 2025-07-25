@@ -15,10 +15,9 @@ import redis.asyncio as redis
 import hashlib
 import requests
 import secrets
-import base64
-import tempfile
+import functools
 import sacad
-from sacad.cover import CoverImageFormat
+from sacad.cover import CoverSourceResult
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -166,7 +165,34 @@ async def fetch_tracks(source_url, ttl=30):
         logging.error(f"[ERROR] Fetch failed: {e}")
         return []
 
+async def sacad_search_url(artist: str, album: str, size: int = 450, tol: int = 25) -> str:
+    """Return the first artwork URL from SACAD without downloading."""
+    source_classes = tuple(sacad.COVER_SOURCE_CLASSES.values())
+    cover_sources = [cls(size, tol) for cls in source_classes]
+    search_futs = [asyncio.ensure_future(cs.search(album, artist)) for cs in cover_sources]
+    await asyncio.gather(*search_futs)
+    results = []
+    for fut in search_futs:
+        results.extend(fut.result())
+    results = await CoverSourceResult.preProcessForComparison(results, size, tol)
+    results.sort(
+        reverse=True,
+        key=functools.cmp_to_key(
+            functools.partial(
+                CoverSourceResult.compare,
+                target_size=size,
+                size_tolerance_prct=tol,
+            )
+        ),
+    )
+    for cs in cover_sources:
+        await cs.closeSession()
+    if results:
+        return results[0].urls[0]
+    return ""
+
 async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
+    """Lookup album art via SACAD but return the source URL."""
     hashed = hash_key(artist, album)
     key = f"cover:{hashed}"
     fail_key = f"fail:{hashed}"
@@ -178,6 +204,7 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
             fails = None
     if fails and int(fails) >= fail_limit:
         return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+
     cached = None
     if rdb_available:
         try:
@@ -187,31 +214,18 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
     if cached:
         await increment_cache_counter("cover", "hit")
         return json.loads(cached)
+
     await increment_cache_counter("cover", "miss")
     try:
-        with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
-            success = await sacad.search_and_download(
-                album,
-                artist,
-                CoverImageFormat.JPEG,
-                450,
-                tmp.name,
-                size_tolerance_prct=25,
-            )
-            if success:
-                with open(tmp.name, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode()
-                meta = {
-                    "imageUrl": f"data:image/jpeg;base64,{img_b64}",
-                    "itunesTrackUrl": "",
-                    "previewUrl": "",
-                }
-                if rdb_available:
-                    try:
-                        await rdb.set(key, json.dumps(meta), ex=ttl)
-                    except Exception:
-                        pass
-                return meta
+        url = await sacad_search_url(artist, album)
+        if url:
+            meta = {"imageUrl": url, "itunesTrackUrl": "", "previewUrl": ""}
+            if rdb_available:
+                try:
+                    await rdb.set(key, json.dumps(meta), ex=ttl)
+                except Exception:
+                    pass
+            return meta
     except Exception as e:
         logging.error(f"[ERROR] SACAD lookup failed: {e}")
     if rdb_available:

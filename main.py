@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import csv
 import redis.asyncio as redis
 import hashlib
 import requests
@@ -41,6 +42,12 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 rdb = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
+# CSV file used for album lookup. Can be overridden with environment variable.
+ALBUM_LOOKUP_CSV = os.getenv("ALBUM_LOOKUP_CSV", "album_lookup.csv")
+
+# In-memory mapping {(artist_lower, title_lower): album}
+album_lookup = {}
+
 # Flag to indicate if Redis is available. If connection fails on startup the
 # application will still run but caching/metrics will be disabled.
 rdb_available = True
@@ -54,6 +61,33 @@ async def check_redis_connection():
         logging.warning(f"Redis unavailable: {e}. Running without cache/metrics.")
         rdb = None
         rdb_available = False
+    # Load CSV after Redis check so we don't block startup
+    load_album_lookup(ALBUM_LOOKUP_CSV)
+
+def load_album_lookup(path: str):
+    """Load CSV mapping of artist+title to album."""
+    global album_lookup
+    if not os.path.exists(path):
+        logging.warning(f"Album lookup CSV not found at {path}")
+        album_lookup = {}
+        return
+    try:
+        with open(path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                title = row.get('title', '').strip().lower()
+                artist = row.get('artist', '').strip().lower()
+                album = row.get('album', '').strip()
+                if title and artist and album:
+                    album_lookup[(artist, title)] = album
+        logging.info(f"Loaded {len(album_lookup)} album entries from {path}")
+    except Exception as e:
+        logging.error(f"Failed to load album lookup CSV: {e}")
+        album_lookup = {}
+
+def get_csv_album(artist: str, title: str) -> str:
+    """Return album from lookup CSV if present."""
+    return album_lookup.get((artist.lower(), title.lower()), '')
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
@@ -248,13 +282,16 @@ async def to_spec_format(raw_tracks):
     tasks = []
     for t in raw_tracks:
         artist = t.get("TPE1", "Family Radio")
-        album = t.get("TALB", t.get("TIT2", ""))
+        title = t.get("TIT2", "")
+        album_csv = get_csv_album(artist, title)
+        album = album_csv or t.get("TALB", title)
         tasks.append(lookup_album_art(artist, album))
     metadatas = await asyncio.gather(*tasks)
     formatted = []
     for idx, (t, meta) in enumerate(zip(raw_tracks, metadatas)):
         artist = t.get("TPE1", "Family Radio")
         title = t.get("TIT2", "")
+        album_csv = get_csv_album(artist, title)
         track_id = hash_key(artist, title)
         cache_key = f"track_start:{track_id}"
         if rdb_available:
@@ -276,7 +313,7 @@ async def to_spec_format(raw_tracks):
             "id": str(uuid.uuid4()),
             "artist": artist,
             "title": title,
-            "album": t.get("TALB", ""),
+            "album": album_csv or t.get("TALB", ""),
             "time": ts,
             "imageUrl": meta["imageUrl"],
             "itunesTrackUrl": meta["itunesTrackUrl"],

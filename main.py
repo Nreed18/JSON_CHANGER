@@ -293,9 +293,6 @@ async def to_spec_format(raw_tracks):
         album = album_csv or t.get("TALB", title)
         if is_family_radio(artist, title):
             tasks.append(asyncio.sleep(0, result=EMPTY_META))
-        if "family radio" in artist.lower() or "family radio" in title.lower():
-        if artist.strip().lower() == "family radio" or title.strip().lower() == "family radio":
-            tasks.append(asyncio.sleep(0, result={"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}))
         else:
             tasks.append(lookup_album_art(artist, album))
     metadatas = await asyncio.gather(*tasks)

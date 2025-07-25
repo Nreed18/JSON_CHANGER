@@ -301,36 +301,33 @@ async def to_spec_format(raw_tracks):
         artist = t.get("TPE1", "Family Radio")
         title = t.get("TIT2", "")
         album_csv = get_csv_album(artist, title)
-        track_id = hash_key(artist, title)
-        cache_key = f"track_start:{track_id}"
-        if rdb_available:
-            try:
-                start_ts = await rdb.get(cache_key)
-            except Exception:
-                start_ts = None
-        else:
-            start_ts = None
-        if start_ts is None:
-            start_ts = str(datetime.now().timestamp())
-            if rdb_available:
-                try:
-                    await rdb.set(cache_key, start_ts, ex=600)
-                except Exception:
-                    pass
-        ts = datetime.fromtimestamp(float(start_ts), tz=central).isoformat()
+
+        played_on = (
+            t.get("played_on")
+            or t.get("last_seen")
+            or datetime.now().timestamp()
+        )
+        ts_dt = datetime.fromtimestamp(float(played_on), tz=central)
+
         formatted.append({
             "id": str(uuid.uuid4()),
             "artist": artist,
             "title": title,
             "album": album_csv or t.get("TALB", ""),
-            "time": ts,
+            "time": ts_dt.isoformat(),
             "imageUrl": meta["imageUrl"],
             "itunesTrackUrl": meta["itunesTrackUrl"],
             "previewUrl": meta["previewUrl"],
             "duration": t.get("duration", "00:03:00"),
             "status": "playing" if idx == 0 else "history",
-            "type": "song"
+            "type": "song",
+            "_ts": float(played_on),
         })
+
+    formatted.sort(key=lambda x: x["_ts"], reverse=True)
+    for f in formatted:
+        f.pop("_ts", None)
+
     return formatted
 
 def get_client_id(request: Request):

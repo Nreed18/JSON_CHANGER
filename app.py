@@ -118,12 +118,22 @@ def to_spec_format(raw_tracks):
         })
 
     out.sort(key=lambda x: x["_ts"], reverse=True)
-    if out:
-        out[0]["status"] = "playing"
+
+    seen = set()
+    deduped = []
     for item in out:
+        key = (item["artist"].lower().strip(), item["title"].lower().strip())
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+
+    if deduped:
+        deduped[0]["status"] = "playing"
+
+    for item in deduped:
         item.pop("_ts", None)
 
-    return out
+    return deduped
 
 # -------------- ROUTES -----------------
 

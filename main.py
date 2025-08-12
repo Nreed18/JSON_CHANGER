@@ -282,6 +282,14 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
             pass
     return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
+def _parse_duration(dur: str) -> int:
+    try:
+        h, m, s = [int(x) for x in dur.split(":")]
+        return h * 3600 + m * 60 + s
+    except Exception:
+        return 180
+
+
 async def to_spec_format(raw_tracks):
     central = timezone("America/Chicago")
     tasks = []
@@ -296,20 +304,28 @@ async def to_spec_format(raw_tracks):
             tasks.append(lookup_album_art(artist, album))
     metadatas = await asyncio.gather(*tasks)
     formatted = []
+    prev_ts = None
     for t, meta in zip(raw_tracks, metadatas):
         artist = t.get("TPE1", "Family Radio")
         title = t.get("TIT2", "")
         album_csv = get_csv_album(artist, title)
 
-        played_on = (
-            t.get("played_on")
-            or t.get("last_seen")
-            or datetime.now().timestamp()
-        )
-        ts_dt = datetime.fromtimestamp(float(played_on), tz=central)
+        ts = None
+        for key in ("played_on", "start_time", "last_seen"):
+            val = t.get(key)
+            if val:
+                ts = float(val)
+                break
+        if ts is None:
+            if prev_ts is None:
+                ts = datetime.now().timestamp()
+            else:
+                ts = prev_ts - _parse_duration(t.get("duration", "00:03:00"))
+        prev_ts = ts
+        ts_dt = datetime.fromtimestamp(ts, tz=central)
 
         base_key = hash_key(artist, title)
-        stable_id = hashlib.sha1(f"{base_key}|{played_on}".encode()).hexdigest()
+        stable_id = hashlib.sha1(f"{base_key}|{ts}".encode()).hexdigest()
 
         formatted.append({
             "id": stable_id,
@@ -323,7 +339,7 @@ async def to_spec_format(raw_tracks):
             "duration": t.get("duration", "00:03:00"),
             "status": "history",
             "type": "song",
-            "_ts": float(played_on),
+            "_ts": ts,
         })
 
     formatted.sort(key=lambda x: x["_ts"], reverse=True)
@@ -335,6 +351,9 @@ async def to_spec_format(raw_tracks):
         if key not in seen:
             seen.add(key)
             deduped.append(item)
+
+    ts_values = [i["_ts"] for i in deduped]
+    assert ts_values == sorted(ts_values, reverse=True)
 
     if deduped:
         deduped[0]["status"] = "playing"

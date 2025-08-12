@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from datetime import datetime
 from pytz import timezone
-import uuid
 import httpx
 import asyncio
 import json
@@ -309,8 +308,11 @@ async def to_spec_format(raw_tracks):
         )
         ts_dt = datetime.fromtimestamp(float(played_on), tz=central)
 
+        base_key = hash_key(artist, title)
+        stable_id = hashlib.sha1(f"{base_key}|{played_on}".encode()).hexdigest()
+
         formatted.append({
-            "id": str(uuid.uuid4()),
+            "id": stable_id,
             "artist": artist,
             "title": title,
             "album": album_csv or t.get("TALB", ""),
@@ -329,7 +331,7 @@ async def to_spec_format(raw_tracks):
     seen = set()
     deduped = []
     for item in formatted:
-        key = (item["artist"].lower().strip(), item["title"].lower().strip())
+        key = item["id"]
         if key not in seen:
             seen.add(key)
             deduped.append(item)

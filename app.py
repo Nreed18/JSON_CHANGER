@@ -1,9 +1,9 @@
 from flask import Flask, jsonify, render_template_string
 from flask_cors import CORS
 import requests
-import uuid
 from datetime import datetime
 from pytz import timezone
+import hashlib
 import base64
 import tempfile
 import asyncio
@@ -47,6 +47,10 @@ SOURCE_WEST   = "https://yp.cdnstream1.com/metadata/2638_128/last/12.json"
 SOURCE_THIRD  = "https://yp.cdnstream1.com/metadata/2878_128/last/12.json"
 SOURCE_FOURTH = ""  # TODO: update with real URL
 SOURCE_FIFTH  = ""  # TODO: update with real URL
+
+
+def hash_key(artist: str, title: str) -> str:
+    return hashlib.sha1(f"{artist.lower()}|{title.lower()}".encode()).hexdigest()
 
 def fetch_tracks(source_url):
     try:
@@ -102,8 +106,11 @@ def to_spec_format(raw_tracks):
         else:
             meta = lookup_album_art(artist, album)
 
+        base_key = hash_key(artist, title)
+        stable_id = hashlib.sha1(f"{base_key}|{start}".encode()).hexdigest()
+
         out.append({
-            "id": str(uuid.uuid4()),
+            "id": stable_id,
             "artist": artist,
             "title": title,
             "album": t.get("TALB", ""),
@@ -122,7 +129,7 @@ def to_spec_format(raw_tracks):
     seen = set()
     deduped = []
     for item in out:
-        key = (item["artist"].lower().strip(), item["title"].lower().strip())
+        key = item["id"]
         if key not in seen:
             seen.add(key)
             deduped.append(item)

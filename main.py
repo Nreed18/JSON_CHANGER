@@ -52,6 +52,166 @@ album_lookup = {}
 # Normalized mapping {(normalized_artist, normalized_title): album}
 album_lookup_normalized = {}
 
+# ---------------------------------------------------------------------------
+# Manual podcast metadata overrides.
+# ---------------------------------------------------------------------------
+
+# Canonical metadata entries. Each entry either defines an iTunes
+# ``collectionId`` that should be used for lookups or a fully specified static
+# metadata payload.
+PODCAST_MANUAL_DATA = {
+    "5 minutes in church history": {"collectionId": 684370851},
+    "answers with ken ham": {"collectionId": 288289674},
+    "morning and evening with charles spurgeon": {"collectionId": 1447539980},
+    "through the esv bible in a year with ray ortlund": {"collectionId": 1104407866},
+    "walk with the king podcast": {"collectionId": 1506603100},
+    "seeking him": {"collectionId": 80040780},
+    "bible q and a with john macarthur": {"collectionId": 580395002},
+    "open the bible minute": {"collectionId": 375345260},
+    "christ meets culture": {"collectionId": 1728902705},
+    "moment of truth": {"collectionId": 1555257529},
+    "truth for life daily program": {"collectionId": 91473880},
+    "ultimately with r c sproul": {"collectionId": 494316084},
+    "portraits of grace on oneplace.com": {"collectionId": 1820586883},
+    "ask pastor john": {"collectionId": 618132843},
+    "grace to you radio podcast": {"collectionId": 292681379},
+    "open the bible": {"collectionId": 335342417},
+    "renewing your mind": {"collectionId": 110916650},
+    "community bridge": {"collectionId": 1450527566},
+    "god and country": {"collectionId": 1562404695},
+    "unveiling mercy": {"collectionId": 1545430118},
+    "godly wisdom": {"collectionId": 1640547820},
+    "a word with you": {"collectionId": 305240906},
+    "encourage mint": {"collectionId": 1576574574},
+    # Static overrides for programmes that do not have a reliable iTunes match.
+    "hear the word": {
+        "static": {
+            "imageUrl": "https://www.familyradio.org/app/uploads/2021/01/Hear-the-Word.jpg",
+            "itunesTrackUrl": "https://www.familyradio.org/?s=hear+the+word",
+            "previewUrl": "",
+        }
+    },
+    "family health checkup": {
+        "static": {
+            "imageUrl": "https://www.familyradio.org/app/uploads/2017/11/cropped-FRLogo.png",
+            "itunesTrackUrl": "https://www.familyradio.org/?s=family+health+checkup",
+            "previewUrl": "",
+        }
+    },
+    "evensong devo": {
+        "static": {
+            "imageUrl": "https://www.familyradio.org/app/uploads/2017/11/cropped-FRLogo.png",
+            "itunesTrackUrl": "https://www.familyradio.org/?s=evensong+devo",
+            "previewUrl": "",
+        }
+    },
+}
+
+# Normalized alias mapping from observed programme titles to canonical keys in
+# ``PODCAST_MANUAL_DATA``.
+PODCAST_TITLE_ALIASES = {
+    "5 min church history": "5 minutes in church history",
+    "5 minutes in church history": "5 minutes in church history",
+    "family health checkup": "family health checkup",
+    "spurgeon morning and evening": "morning and evening with charles spurgeon",
+    "morning and evening": "morning and evening with charles spurgeon",
+    "morning and evening with charles spurgeon": "morning and evening with charles spurgeon",
+    "answers in genesis": "answers with ken ham",
+    "answers with ken ham": "answers with ken ham",
+    "through the bible in a year": "through the esv bible in a year with ray ortlund",
+    "through the esv bible in a year with ray ortlund": "through the esv bible in a year with ray ortlund",
+    "walk with the king": "walk with the king podcast",
+    "walk with the king podcast": "walk with the king podcast",
+    "seeking him": "seeking him",
+    "gty bible qa": "bible q and a with john macarthur",
+    "bible q a with john macarthur": "bible q and a with john macarthur",
+    "open the bible minute": "open the bible minute",
+    "christ meets culture": "christ meets culture",
+    "moment of truth": "moment of truth",
+    "moment of truth (american moment)": "moment of truth",
+    "hear the word": "hear the word",
+    "hear the word bible reading": "hear the word",
+    "truth for life": "truth for life daily program",
+    "truth for life daily program": "truth for life daily program",
+    "ultimately": "ultimately with r c sproul",
+    "ultimately with r c sproul": "ultimately with r c sproul",
+    "portraits of grace": "portraits of grace on oneplace.com",
+    "portraits of grace on oneplace.com": "portraits of grace on oneplace.com",
+    "ask pastor john": "ask pastor john",
+    "grace to you": "grace to you radio podcast",
+    "grace to you radio podcast": "grace to you radio podcast",
+    "open the bible": "open the bible",
+    "renewing your mind": "renewing your mind",
+    "renewing your mind minute": "renewing your mind",
+    "evensong devo": "evensong devo",
+    "community bridge": "community bridge",
+    "god and country": "god and country",
+    "unveiling mercy": "unveiling mercy",
+    "godly wisdom": "godly wisdom",
+    "a word with you": "a word with you",
+    "morning and evening devotional": "morning and evening with charles spurgeon",
+    "encourage mint": "encourage mint",
+    "encourage mints": "encourage mint",
+}
+
+
+def _resolve_podcast_key(title: str) -> Optional[str]:
+    """Return the canonical override key for a programme title."""
+    norm_title = normalize_title(title or "")
+    if not norm_title:
+        return None
+    if norm_title in PODCAST_MANUAL_DATA:
+        return norm_title
+    return PODCAST_TITLE_ALIASES.get(norm_title)
+
+
+async def _lookup_itunes_collection_by_id(collection_id: int) -> Optional[Dict[str, str]]:
+    """Fetch metadata for a specific iTunes collection identifier."""
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            resp = await client.get("https://itunes.apple.com/lookup", params={"id": collection_id})
+            resp.raise_for_status()
+        except Exception as exc:
+            logging.debug(f"iTunes lookup failed for collection {collection_id}: {exc}")
+            return None
+
+    data = resp.json()
+    results = data.get("results", [])
+    if not results:
+        return None
+
+    result = results[0]
+    artwork = result.get("artworkUrl600") or result.get("artworkUrl100") or result.get("artworkUrl60", "")
+    artwork = _upgrade_artwork_url(artwork)
+    if not artwork:
+        return None
+
+    return {
+        "imageUrl": artwork,
+        "itunesTrackUrl": result.get("collectionViewUrl", ""),
+        "previewUrl": result.get("feedUrl", ""),
+    }
+
+
+async def get_manual_podcast_metadata(title: str) -> Optional[Dict[str, str]]:
+    """Return metadata overrides for known podcasts if available."""
+    key = _resolve_podcast_key(title)
+    if not key:
+        return None
+
+    data = PODCAST_MANUAL_DATA.get(key)
+    if not data:
+        return None
+
+    if "static" in data:
+        return data["static"]
+
+    collection_id = data.get("collectionId")
+    if collection_id:
+        return await _lookup_itunes_collection_by_id(collection_id)
+
+    return None
+
 # Flag to indicate if Redis is available. If connection fails on startup the
 # application will still run but caching/metrics will be disabled.
 rdb_available = True
@@ -460,6 +620,15 @@ async def lookup_album_art(artist, album, title=None, ttl=300, fail_limit=3):
                 return meta
 
     await increment_cache_counter("cover", "miss")
+
+    manual_meta = await get_manual_podcast_metadata(title or "")
+    if manual_meta and manual_meta.get("imageUrl"):
+        if rdb_available:
+            try:
+                await rdb.set(key, json.dumps(manual_meta), ex=ttl)
+            except Exception:
+                pass
+        return manual_meta
 
     # Try the iTunes Search API first — it applies additional normalization
     # checks so we are less likely to pick an incorrect match.

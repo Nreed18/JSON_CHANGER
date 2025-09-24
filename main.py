@@ -448,12 +448,36 @@ async def lookup_album_art(artist, album, title=None, ttl=300, fail_limit=3):
             meta = json.loads(cached)
         except Exception:
             meta = None
-        if meta and not str(meta.get("imageUrl", "")).startswith("data:"):
-            return meta
-        # Discard old base64 cache and refetch
-        return json.loads(cached)
+        if meta:
+            image_url = str(meta.get("imageUrl", ""))
+            if image_url.startswith("data:"):
+                if rdb_available:
+                    try:
+                        await rdb.delete(key)
+                    except Exception:
+                        pass
+            else:
+                return meta
 
     await increment_cache_counter("cover", "miss")
+
+    # Try the iTunes Search API first — it applies additional normalization
+    # checks so we are less likely to pick an incorrect match.
+    itunes_meta = None
+    try:
+        itunes_meta = await lookup_itunes_metadata(artist, title or "", album=album or None)
+    except Exception as exc:
+        logging.debug(f"iTunes lookup failed for {artist} - {title or album}: {exc}")
+
+    if itunes_meta and itunes_meta.get("imageUrl"):
+        if rdb_available:
+            try:
+                await rdb.set(key, json.dumps(itunes_meta), ex=ttl)
+            except Exception:
+                pass
+        return itunes_meta
+
+    # Fall back to SACAD only if iTunes could not provide artwork.
     search_term = album or title or ""
     if search_term:
         try:
@@ -468,21 +492,6 @@ async def lookup_album_art(artist, album, title=None, ttl=300, fail_limit=3):
                 return meta
         except Exception as e:
             logging.error(f"[ERROR] SACAD lookup failed: {e}")
-
-    # SACAD failed, try iTunes as a fallback
-    try:
-        itunes_meta = await lookup_itunes_metadata(artist, title or "", album=album or None)
-    except Exception as exc:
-        logging.debug(f"iTunes lookup failed for {artist} - {title or album}: {exc}")
-        itunes_meta = None
-
-    if itunes_meta:
-        if rdb_available:
-            try:
-                await rdb.set(key, json.dumps(itunes_meta), ex=ttl)
-            except Exception:
-                pass
-        return itunes_meta
 
     if rdb_available:
         try:

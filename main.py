@@ -16,8 +16,11 @@ import hashlib
 import requests
 import secrets
 import functools
+import re
+import unicodedata
 import sacad
 from sacad.cover import CoverSourceResult
+from typing import Dict, Optional
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -46,6 +49,8 @@ ALBUM_LOOKUP_CSV = os.getenv("ALBUM_LOOKUP_CSV", "album_lookup.csv")
 
 # In-memory mapping {(artist_lower, title_lower): album}
 album_lookup = {}
+# Normalized mapping {(normalized_artist, normalized_title): album}
+album_lookup_normalized = {}
 
 # Flag to indicate if Redis is available. If connection fails on startup the
 # application will still run but caching/metrics will be disabled.
@@ -63,30 +68,216 @@ async def check_redis_connection():
     # Load CSV after Redis check so we don't block startup
     load_album_lookup(ALBUM_LOOKUP_CSV)
 
+def _strip_accents(value: str) -> str:
+    """Return a lowercase representation without accents."""
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_artist(artist: str) -> str:
+    artist = _strip_accents(artist).lower()
+    artist = artist.replace("&", " and ")
+    artist = re.sub(r"^the\s+", "", artist)
+    artist = re.sub(r"[^a-z0-9]+", " ", artist)
+    return _normalize_whitespace(artist)
+
+
+def _remove_featured(text: str) -> str:
+    return re.sub(r"\b(feat\.?|ft\.?|featuring)\b.*", "", text, flags=re.IGNORECASE)
+
+
+def normalize_title(title: str) -> str:
+    title = _strip_accents(title)
+    title = _remove_featured(title)
+    title = re.sub(r"[\(\[].*?[\)\]]", "", title)
+    title = re.sub(r"\s+[-–—]\s+.*", "", title)
+    title = re.sub(r"[^a-zA-Z0-9]+", " ", title)
+    return _normalize_whitespace(title.lower())
+
+
+def normalize_album(album: str) -> str:
+    album = _strip_accents(album).lower()
+    album = album.replace("&", " and ")
+    album = re.sub(r"[^a-z0-9]+", " ", album)
+    return _normalize_whitespace(album)
+
+
 def load_album_lookup(path: str):
     """Load CSV mapping of artist+title to album."""
-    global album_lookup
+    global album_lookup, album_lookup_normalized
     if not os.path.exists(path):
         logging.warning(f"Album lookup CSV not found at {path}")
         album_lookup = {}
+        album_lookup_normalized = {}
         return
     try:
         with open(path, newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
+            album_lookup = {}
+            album_lookup_normalized = {}
             for row in reader:
                 title = row.get('title', '').strip().lower()
                 artist = row.get('artist', '').strip().lower()
                 album = row.get('album', '').strip()
                 if title and artist and album:
                     album_lookup[(artist, title)] = album
+                    norm_artist = normalize_artist(row.get('artist', ''))
+                    norm_title = normalize_title(row.get('title', ''))
+                    if norm_artist and norm_title:
+                        album_lookup_normalized[(norm_artist, norm_title)] = album
         logging.info(f"Loaded {len(album_lookup)} album entries from {path}")
     except Exception as e:
         logging.error(f"Failed to load album lookup CSV: {e}")
         album_lookup = {}
+        album_lookup_normalized = {}
 
 def get_csv_album(artist: str, title: str) -> str:
     """Return album from lookup CSV if present."""
-    return album_lookup.get((artist.lower(), title.lower()), '')
+    if not artist or not title:
+        return ''
+
+    artist_key = artist.strip().lower()
+    title_key = title.strip().lower()
+    direct = album_lookup.get((artist_key, title_key))
+    if direct:
+        return direct
+
+    norm_artist = normalize_artist(artist)
+    norm_title = normalize_title(title)
+    normalized = album_lookup_normalized.get((norm_artist, norm_title))
+    if normalized:
+        return normalized
+
+    # Try again with normalized title only but direct artist match
+    normalized = album_lookup.get((artist_key, norm_title))
+    if normalized:
+        return normalized
+
+    # Try normalized artist with direct title
+    normalized = album_lookup.get((norm_artist, title_key))
+    if normalized:
+        return normalized
+
+    return ''
+
+
+def _looks_like_podcast(artist: str, title: str) -> bool:
+    """Heuristic to detect teaching segments that are likely podcasts."""
+    text = f"{artist} {title}".lower()
+    hints = (
+        "ministries",
+        "ministry",
+        "bible",
+        "radio",
+        "church",
+        "sermon",
+        "teaching",
+        "pastor",
+        "broadcast",
+        "program",
+    )
+    return any(hint in text for hint in hints)
+
+
+def _upgrade_artwork_url(url: str) -> str:
+    if not url:
+        return ''
+    upgraded = re.sub(r"/(\d{2,4})x(\d{2,4})(bb)?", "/600x600\\3", url)
+    if upgraded == url:
+        for size in ("100x100", "60x60", "140x140", "300x300"):
+            if size in upgraded:
+                return upgraded.replace(size, "600x600")
+    return upgraded
+
+
+async def lookup_itunes_metadata(artist: str, title: str, album: Optional[str] = None) -> Optional[Dict[str, str]]:
+    """Query the iTunes Search API for artwork and metadata."""
+
+    def matches_artist(candidate: str) -> bool:
+        if not artist:
+            return True
+        return normalize_artist(candidate) == normalize_artist(artist)
+
+    def matches_title(candidate: str) -> bool:
+        if not title:
+            return True
+        return normalize_title(candidate) == normalize_title(title)
+
+    def matches_album(candidate: str) -> bool:
+        if not album:
+            return True
+        candidate_norm = normalize_album(candidate)
+        album_norm = normalize_album(album)
+        return candidate_norm == album_norm or album_norm in candidate_norm
+
+    search_params = []
+    if album:
+        search_params.append({"term": f"{artist} {album}".strip(), "media": "music", "entity": "album"})
+    if title:
+        search_params.append({"term": f"{artist} {title}".strip(), "media": "music", "entity": "song"})
+    if album:
+        search_params.append({"term": album, "media": "music", "entity": "album"})
+
+    if _looks_like_podcast(artist, title):
+        search_params.append({"term": f"{artist} {title}".strip(), "media": "podcast", "entity": "podcast"})
+
+    async with httpx.AsyncClient(timeout=5) as client:
+        for params in search_params:
+            term = params.get("term", "").strip()
+            if not term:
+                continue
+            try:
+                resp = await client.get(
+                    "https://itunes.apple.com/search",
+                    params={**params, "limit": 5},
+                )
+                resp.raise_for_status()
+            except Exception as exc:
+                logging.debug(f"iTunes search failed for {params}: {exc}")
+                continue
+
+            data = resp.json()
+            for result in data.get("results", []):
+                result_artist = result.get("artistName", "")
+                result_title = result.get("trackName") or result.get("collectionName", "")
+                result_album = result.get("collectionName", "")
+
+                if params.get("entity") == "album":
+                    if matches_artist(result_artist) and matches_album(result_album):
+                        artwork = _upgrade_artwork_url(result.get("artworkUrl100") or result.get("artworkUrl60", ""))
+                        if not artwork:
+                            continue
+                        return {
+                            "imageUrl": artwork,
+                            "itunesTrackUrl": result.get("collectionViewUrl", ""),
+                            "previewUrl": result.get("previewUrl", ""),
+                        }
+                elif params.get("entity") == "podcast":
+                    artwork = _upgrade_artwork_url(result.get("artworkUrl100") or result.get("artworkUrl60", ""))
+                    if not artwork:
+                        continue
+                    if matches_artist(result_artist) or matches_title(result_title):
+                        return {
+                            "imageUrl": artwork,
+                            "itunesTrackUrl": result.get("collectionViewUrl", ""),
+                            "previewUrl": result.get("feedUrl", ""),
+                        }
+                else:
+                    if matches_artist(result_artist) and matches_title(result_title):
+                        artwork = result.get("artworkUrl100") or result.get("artworkUrl60", "")
+                        artwork = _upgrade_artwork_url(artwork)
+                        if not artwork:
+                            continue
+                        return {
+                            "imageUrl": artwork,
+                            "itunesTrackUrl": result.get("trackViewUrl", ""),
+                            "previewUrl": result.get("previewUrl", ""),
+                        }
+    return None
 
 EMPTY_META = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
@@ -230,9 +421,10 @@ async def sacad_search_url(artist: str, album: str, size: int = 450, tol: int = 
         return results[0].urls[0]
     return ""
 
-async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
+async def lookup_album_art(artist, album, title=None, ttl=300, fail_limit=3):
     """Lookup album art via SACAD but return the source URL."""
-    hashed = hash_key(artist, album)
+    lookup_target = album or title or ""
+    hashed = hash_key(artist, lookup_target)
     key = f"cover:{hashed}"
     fail_key = f"fail:{hashed}"
     fails = None
@@ -262,18 +454,36 @@ async def lookup_album_art(artist, album, ttl=300, fail_limit=3):
         return json.loads(cached)
 
     await increment_cache_counter("cover", "miss")
+    search_term = album or title or ""
+    if search_term:
+        try:
+            url = await sacad_search_url(artist, search_term)
+            if url:
+                meta = {"imageUrl": url, "itunesTrackUrl": "", "previewUrl": ""}
+                if rdb_available:
+                    try:
+                        await rdb.set(key, json.dumps(meta), ex=ttl)
+                    except Exception:
+                        pass
+                return meta
+        except Exception as e:
+            logging.error(f"[ERROR] SACAD lookup failed: {e}")
+
+    # SACAD failed, try iTunes as a fallback
     try:
-        url = await sacad_search_url(artist, album)
-        if url:
-            meta = {"imageUrl": url, "itunesTrackUrl": "", "previewUrl": ""}
-            if rdb_available:
-                try:
-                    await rdb.set(key, json.dumps(meta), ex=ttl)
-                except Exception:
-                    pass
-            return meta
-    except Exception as e:
-        logging.error(f"[ERROR] SACAD lookup failed: {e}")
+        itunes_meta = await lookup_itunes_metadata(artist, title or "", album=album or None)
+    except Exception as exc:
+        logging.debug(f"iTunes lookup failed for {artist} - {title or album}: {exc}")
+        itunes_meta = None
+
+    if itunes_meta:
+        if rdb_available:
+            try:
+                await rdb.set(key, json.dumps(itunes_meta), ex=ttl)
+            except Exception:
+                pass
+        return itunes_meta
+
     if rdb_available:
         try:
             await rdb.incr(fail_key)
@@ -301,7 +511,7 @@ async def to_spec_format(raw_tracks):
         if is_family_radio(artist, title):
             tasks.append(asyncio.sleep(0, result=EMPTY_META))
         else:
-            tasks.append(lookup_album_art(artist, album))
+            tasks.append(lookup_album_art(artist, album, title))
     metadatas = await asyncio.gather(*tasks)
     formatted = []
     prev_ts = None

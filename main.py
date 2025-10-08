@@ -439,6 +439,8 @@ async def lookup_itunes_metadata(artist: str, title: str, album: Optional[str] =
                         }
     return None
 
+# Default fallback image for when no artwork is found
+FALLBACK_IMAGE = "https://www.familyradio.org/app/uploads/2017/11/cropped-FRLogo.png"
 EMPTY_META = {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
 
 def is_family_radio(artist: str, title: str) -> bool:
@@ -668,7 +670,10 @@ async def lookup_album_art(artist, album, title=None, ttl=300, fail_limit=3):
             await rdb.expire(fail_key, 86400)
         except Exception:
             pass
-    return {"imageUrl": "", "itunesTrackUrl": "", "previewUrl": ""}
+    
+    # Return fallback image for better user experience
+    logging.info(f"No album art found for {artist} - {search_term}, using fallback")
+    return {"imageUrl": FALLBACK_IMAGE, "itunesTrackUrl": "", "previewUrl": ""}
 
 def _parse_duration(dur: str) -> int:
     try:

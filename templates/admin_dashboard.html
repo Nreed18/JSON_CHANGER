@@ -2,25 +2,328 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Admin Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Dashboard - Family Radio</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 2rem; }
-        .buttons a, .buttons form { margin-right: 1rem; display: inline-block; }
-        .buttons form button { padding: 0.5rem 1rem; }
-        pre { background: #f4f4f4; padding: 1rem; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .header h1 {
+            color: #667eea;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        
+        .timestamp {
+            color: #666;
+            font-size: 0.95rem;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        
+        .status-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .quick-links {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .quick-links a, .quick-links button {
+            padding: 0.75rem 1.5rem;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        
+        .quick-links a:hover, .quick-links button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #667eea;
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #667eea;
+            margin: 0.5rem 0;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .feed-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+        }
+        
+        .feed-name {
+            font-weight: 600;
+            color: #333;
+            text-transform: capitalize;
+        }
+        
+        .metrics-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .metrics-table th {
+            background: #667eea;
+            color: white;
+            padding: 0.75rem;
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+        }
+        
+        .metrics-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .metrics-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .cache-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+        
+        .cache-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .cache-value {
+            color: #333;
+            font-weight: 700;
+        }
+        
+        .success {
+            color: #28a745;
+        }
+        
+        .error {
+            color: #dc3545;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+            
+            .header h1 {
+                font-size: 1.5rem;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .refresh-note {
+            text-align: center;
+            color: white;
+            margin-top: 2rem;
+            font-size: 0.9rem;
+        }
+        
+        .icon {
+            font-size: 1.5rem;
+        }
     </style>
 </head>
 <body>
-    <h1>Admin Dashboard</h1>
-    <div class="buttons">
-        <a href="{{ url_for('feed_east') }}" target="_blank">East Feed</a>
-        <a href="{{ url_for('feed_west') }}" target="_blank">West Feed</a>
-        <a href="{{ url_for('feed_worship') }}" target="_blank">Worship Feed</a>
-        <form action="{{ url_for('trigger_test_alert') }}" method="get" target="_blank">
-            <button>Send Test Alert</button>
-        </form>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>📊 Family Radio Admin Dashboard</h1>
+                <div class="timestamp">Last updated: {{ metrics.timestamp }}</div>
+            </div>
+            <div>
+                <span class="status-badge {% if metrics.status == 'ok' %}status-ok{% else %}status-error{% endif %}">
+                    System Status: {{ metrics.status|upper }}
+                </span>
+            </div>
+        </div>
+        
+        <div class="quick-links">
+            <a href="{{ url_for('feed_east') }}" target="_blank">📡 East Feed</a>
+            <a href="{{ url_for('feed_west') }}" target="_blank">📡 West Feed</a>
+            <a href="{{ url_for('feed_worship') }}" target="_blank">📡 Worship Feed</a>
+            <a href="{{ url_for('feed_fourth') }}" target="_blank">📡 Fourth Feed</a>
+            <a href="{{ url_for('feed_fifth') }}" target="_blank">📡 Fifth Feed</a>
+            <a href="{{ url_for('trigger_test_alert') }}" target="_blank">🚨 Send Test Alert</a>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2><span class="icon">🎵</span> Feed Status</h2>
+                {% for feed, status in metrics.feed_status.items() %}
+                <div class="feed-status">
+                    <span class="feed-name">{{ feed }}</span>
+                    <span class="status-badge {% if status == 'ok' %}status-ok{% else %}status-error{% endif %}">
+                        {{ status|upper }}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div class="card">
+                <h2><span class="icon">💾</span> Cache Statistics</h2>
+                <div class="cache-stat">
+                    <span class="cache-label">Feed Cache Entries:</span>
+                    <span class="cache-value">{{ metrics.cache.feed_keys }}</span>
+                </div>
+                <div class="cache-stat">
+                    <span class="cache-label">Cover Cache Entries:</span>
+                    <span class="cache-value">{{ metrics.cache.cover_keys }}</span>
+                </div>
+                <div class="cache-stat">
+                    <span class="cache-label">Feed Cache Hits:</span>
+                    <span class="cache-value success">{{ metrics.cache.hits.feed }}</span>
+                </div>
+                <div class="cache-stat">
+                    <span class="cache-label">Feed Cache Misses:</span>
+                    <span class="cache-value error">{{ metrics.cache.misses.feed }}</span>
+                </div>
+                <div class="cache-stat">
+                    <span class="cache-label">Cover Cache Hits:</span>
+                    <span class="cache-value success">{{ metrics.cache.hits.cover }}</span>
+                </div>
+                <div class="cache-stat">
+                    <span class="cache-label">Cover Cache Misses:</span>
+                    <span class="cache-value error">{{ metrics.cache.misses.cover }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2><span class="icon">📈</span> Feed Metrics</h2>
+            <table class="metrics-table">
+                <thead>
+                    <tr>
+                        <th>Feed</th>
+                        <th>Minute</th>
+                        <th>Hour</th>
+                        <th>Day</th>
+                        <th>Week</th>
+                        <th>Month</th>
+                        <th>Year</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for feed_metrics in metrics.feeds %}
+                    <tr>
+                        <td><strong>{{ feed_metrics.feed|capitalize }}</strong></td>
+                        <td>{{ feed_metrics.total.minute }} / {{ feed_metrics.unique.minute }}</td>
+                        <td>{{ feed_metrics.total.hour }} / {{ feed_metrics.unique.hour }}</td>
+                        <td>{{ feed_metrics.total.day }} / {{ feed_metrics.unique.day }}</td>
+                        <td>{{ feed_metrics.total.week }} / {{ feed_metrics.unique.week }}</td>
+                        <td>{{ feed_metrics.total.month }} / {{ feed_metrics.unique.month }}</td>
+                        <td>{{ feed_metrics.total.year }} / {{ feed_metrics.unique.year }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <p style="margin-top: 1rem; color: #666; font-size: 0.9rem;">
+                <em>Format: Total Requests / Unique Clients</em>
+            </p>
+        </div>
+        
+        <div class="refresh-note">
+            🔄 Page automatically refreshes with the latest data on each visit
+        </div>
     </div>
-    <h2>Metrics</h2>
-    <pre>{{ metrics | tojson(indent=2) }}</pre>
 </body>
 </html>

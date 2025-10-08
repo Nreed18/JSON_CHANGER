@@ -360,12 +360,16 @@ async def lookup_itunes_metadata(artist: str, title: str, album: Optional[str] =
     def matches_artist(candidate: str) -> bool:
         if not artist:
             return True
-        return normalize_artist(candidate) == normalize_artist(artist)
+        norm_candidate = normalize_artist(candidate)
+        norm_artist = normalize_artist(artist)
+        return norm_candidate == norm_artist or norm_artist in norm_candidate or norm_candidate in norm_artist
 
     def matches_title(candidate: str) -> bool:
         if not title:
             return True
-        return normalize_title(candidate) == normalize_title(title)
+        norm_candidate = normalize_title(candidate)
+        norm_title = normalize_title(title)
+        return norm_candidate == norm_title or norm_title in norm_candidate or norm_candidate in norm_title
 
     def matches_album(candidate: str) -> bool:
         if not album:

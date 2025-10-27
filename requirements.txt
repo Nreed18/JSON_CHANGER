@@ -6,5 +6,3 @@ httpx
 redis
 jinja2
 sacad
-flask
-flask-cors

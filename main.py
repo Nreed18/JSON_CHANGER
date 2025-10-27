@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from datetime import datetime
 from pytz import timezone
+from contextlib import asynccontextmanager
 import httpx
 import asyncio
 import json
@@ -13,7 +14,6 @@ import os
 import csv
 import redis.asyncio as redis
 import hashlib
-import requests
 import secrets
 import functools
 import re
@@ -22,23 +22,18 @@ import sacad
 from sacad.cover import CoverSourceResult
 from typing import Dict, Optional
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-security = HTTPBasic()
-
-USERNAME = os.getenv("ADMIN_USER", "admin")
-PASSWORD = os.getenv("ADMIN_PASSWORD", "familyradio2025")
-PAGERDUTY_KEY = os.getenv("PD_ROUTING_KEY", "be2800efd3ac410fc05d30cea86764f9")
-
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
+USERNAME = os.getenv("ADMIN_USER")
+PASSWORD = os.getenv("ADMIN_PASSWORD")
+PAGERDUTY_KEY = os.getenv("PD_ROUTING_KEY")
+
+# Validate required environment variables
+if not USERNAME or not PASSWORD:
+    logging.warning("ADMIN_USER and ADMIN_PASSWORD environment variables not set. Admin features will be disabled.")
+if not PAGERDUTY_KEY:
+    logging.warning("PD_ROUTING_KEY environment variable not set. PagerDuty alerts will be disabled.")
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
@@ -51,6 +46,47 @@ ALBUM_LOOKUP_CSV = os.getenv("ALBUM_LOOKUP_CSV", "album_lookup.csv")
 album_lookup = {}
 # Normalized mapping {(normalized_artist, normalized_title): album}
 album_lookup_normalized = {}
+
+# ---------------------------------------------------------------------------
+# Normalization Functions - Must be defined before use
+# ---------------------------------------------------------------------------
+
+def _strip_accents(value: str) -> str:
+    """Return a lowercase representation without accents."""
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_artist(artist: str) -> str:
+    artist = _strip_accents(artist).lower()
+    artist = artist.replace("&", " and ")
+    artist = re.sub(r"^the\s+", "", artist)
+    artist = re.sub(r"[^a-z0-9]+", " ", artist)
+    return _normalize_whitespace(artist)
+
+
+def _remove_featured(text: str) -> str:
+    return re.sub(r"\b(feat\.?|ft\.?|featuring)\b.*", "", text, flags=re.IGNORECASE)
+
+
+def normalize_title(title: str) -> str:
+    title = _strip_accents(title)
+    title = _remove_featured(title)
+    title = re.sub(r"[\(\[].*?[\)\]]", "", title)
+    title = re.sub(r"\s+[-–—]\s+.*", "", title)
+    title = re.sub(r"[^a-zA-Z0-9]+", " ", title)
+    return _normalize_whitespace(title.lower())
+
+
+def normalize_album(album: str) -> str:
+    album = _strip_accents(album).lower()
+    album = album.replace("&", " and ")
+    album = re.sub(r"[^a-z0-9]+", " ", album)
+    return _normalize_whitespace(album)
 
 # ---------------------------------------------------------------------------
 # Manual podcast metadata overrides.
@@ -216,11 +252,14 @@ async def get_manual_podcast_metadata(title: str) -> Optional[Dict[str, str]]:
 # application will still run but caching/metrics will be disabled.
 rdb_available = True
 
-@app.on_event("startup")
-async def check_redis_connection():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
     global rdb, rdb_available
+    # Startup
     try:
         await rdb.ping()
+        logging.info("Redis connection successful")
     except Exception as e:
         logging.warning(f"Redis unavailable: {e}. Running without cache/metrics.")
         rdb = None
@@ -228,43 +267,26 @@ async def check_redis_connection():
     # Load CSV after Redis check so we don't block startup
     load_album_lookup(ALBUM_LOOKUP_CSV)
 
-def _strip_accents(value: str) -> str:
-    """Return a lowercase representation without accents."""
-    normalized = unicodedata.normalize("NFKD", value)
-    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    yield
 
+    # Shutdown
+    if rdb_available and rdb:
+        await rdb.close()
+        logging.info("Redis connection closed")
 
-def _normalize_whitespace(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+app = FastAPI(lifespan=lifespan)
+templates = Jinja2Templates(directory="templates")
+security = HTTPBasic()
 
-
-def normalize_artist(artist: str) -> str:
-    artist = _strip_accents(artist).lower()
-    artist = artist.replace("&", " and ")
-    artist = re.sub(r"^the\s+", "", artist)
-    artist = re.sub(r"[^a-z0-9]+", " ", artist)
-    return _normalize_whitespace(artist)
-
-
-def _remove_featured(text: str) -> str:
-    return re.sub(r"\b(feat\.?|ft\.?|featuring)\b.*", "", text, flags=re.IGNORECASE)
-
-
-def normalize_title(title: str) -> str:
-    title = _strip_accents(title)
-    title = _remove_featured(title)
-    title = re.sub(r"[\(\[].*?[\)\]]", "", title)
-    title = re.sub(r"\s+[-–—]\s+.*", "", title)
-    title = re.sub(r"[^a-zA-Z0-9]+", " ", title)
-    return _normalize_whitespace(title.lower())
-
-
-def normalize_album(album: str) -> str:
-    album = _strip_accents(album).lower()
-    album = album.replace("&", " and ")
-    album = re.sub(r"[^a-z0-9]+", " ", album)
-    return _normalize_whitespace(album)
-
+# CORS Configuration - Consider restricting origins in production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+    allow_credentials=True
+)
 
 def load_album_lookup(path: str):
     """Load CSV mapping of artist+title to album."""
@@ -473,8 +495,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <a class="button" href="/east-feed.json" target="_blank">East Feed (WFME)</a>
   <a class="button" href="/west-feed.json" target="_blank">West Feed (KEAR)</a>
   <a class="button" href="/worship-feed.json" target="_blank">Worship Feed</a>
-  <a class="button" href="/fourth-feed.json" target="_blank">Fourth Feed</a>
-  <a class="button" href="/fifth-feed.json" target="_blank">Fifth Feed</a>
+  <a class="button" href="/fourth-feed.json" target="_blank">Everlight Hymns</a>
+  <a class="button" href="/fifth-feed.json" target="_blank">FR Foundations</a>
+  <a class="button" href="/sixth-feed.json" target="_blank">Christmas</a>
   <br><br>
   <a class="button admin-button" href="/admin/dashboard" target="_blank">📊 Admin Dashboard</a>
   <form action="/admin/test-alert" method="get" target="_blank" style="margin-top: 2rem;">
@@ -486,8 +509,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 SOURCE_EAST   = "https://yp.cdnstream1.com/metadata/2632_128/last/12.json"
 SOURCE_WEST   = "https://yp.cdnstream1.com/metadata/2638_128/last/12.json"
 SOURCE_THIRD  = "https://yp.cdnstream1.com/metadata/2878_128/last/12.json"
-SOURCE_FOURTH = ""  # TODO: update with real URL
-SOURCE_FIFTH  = ""  # TODO: update with real URL
+SOURCE_FOURTH = "https://yp.cdnstream1.com/metadata/10484_128/last/12.json"  # Everlight Hymns
+SOURCE_FIFTH  = "https://yp.cdnstream1.com/metadata/10483_128/last/12.json"  # FR Foundations
+SOURCE_SIXTH  = "https://yp.cdnstream1.com/metadata/5432_128/last/12.json"   # Christmas
 
 def hash_key(artist: str, title: str) -> str:
     return hashlib.sha1(f"{artist.lower()}|{title.lower()}".encode()).hexdigest()
@@ -534,6 +558,10 @@ async def increment_cache_counter(cache_type: str, status: str):
     await rdb.incr(key)
 
 async def fetch_tracks(source_url, ttl=30):
+    if not source_url:
+        logging.warning("Empty source URL provided to fetch_tracks")
+        return []
+
     key = f"feed:{source_url}"
     if rdb_available:
         try:
@@ -558,7 +586,7 @@ async def fetch_tracks(source_url, ttl=30):
                     pass
             return data
     except Exception as e:
-        logging.error(f"[ERROR] Fetch failed: {e}")
+        logging.error(f"[ERROR] Fetch failed for {source_url}: {e}")
         return []
 
 async def sacad_search_url(artist: str, album: str, size: int = 450, tol: int = 25) -> str:
@@ -802,6 +830,14 @@ async def feed_fifth(request: Request):
     await increment_metrics("fifth", client_id)
     data = await fetch_tracks(SOURCE_FIFTH)
     return JSONResponse({"nowPlaying": await to_spec_format(data)})
+
+@app.get("/sixth-feed.json")
+async def feed_sixth(request: Request):
+    client_id = get_client_id(request)
+    await increment_metrics("sixth", client_id)
+    data = await fetch_tracks(SOURCE_SIXTH)
+    return JSONResponse({"nowPlaying": await to_spec_format(data)})
+
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
 
@@ -836,13 +872,14 @@ async def admin_dashboard(request: Request):
         except Exception:
             return (False, [])
 
-    feeds = ["east", "west", "worship", "fourth", "fifth"]
+    feeds = ["east", "west", "worship", "fourth", "fifth", "sixth"]
     feed_urls = [
         SOURCE_EAST,
         SOURCE_WEST,
         SOURCE_THIRD,
         SOURCE_FOURTH,
         SOURCE_FIFTH,
+        SOURCE_SIXTH,
     ]
     metrics = await asyncio.gather(*(get_feed_metrics(f) for f in feeds))
     health_checks = await asyncio.gather(*(feed_health(url) for url in feed_urls))
@@ -874,6 +911,7 @@ async def admin_dashboard(request: Request):
             last_feed_check_worship = await rdb.get('last_feed_check:worship')
             last_feed_check_fourth = await rdb.get('last_feed_check:fourth')
             last_feed_check_fifth = await rdb.get('last_feed_check:fifth')
+            last_feed_check_sixth = await rdb.get('last_feed_check:sixth')
         except Exception:
             cache_feed_keys = []
             cache_cover_keys = []
@@ -882,6 +920,7 @@ async def admin_dashboard(request: Request):
             last_feed_check = last_feed_check_east = None
             last_feed_check_west = last_feed_check_worship = None
             last_feed_check_fourth = last_feed_check_fifth = None
+            last_feed_check_sixth = None
             logging.warning("Redis became unavailable during dashboard request")
     else:
         cache_feed_keys = []
@@ -891,6 +930,7 @@ async def admin_dashboard(request: Request):
         last_feed_check = last_feed_check_east = None
         last_feed_check_west = last_feed_check_worship = None
         last_feed_check_fourth = last_feed_check_fifth = None
+        last_feed_check_sixth = None
 
     metrics_dict = {
         "timestamp": now,
@@ -914,7 +954,8 @@ async def admin_dashboard(request: Request):
         "last_feed_check_west": last_feed_check_west,
         "last_feed_check_worship": last_feed_check_worship,
         "last_feed_check_fourth": last_feed_check_fourth,
-        "last_feed_check_fifth": last_feed_check_fifth
+        "last_feed_check_fifth": last_feed_check_fifth,
+        "last_feed_check_sixth": last_feed_check_sixth
     }
 
     return templates.TemplateResponse(
@@ -924,15 +965,22 @@ async def admin_dashboard(request: Request):
 
 @app.get("/admin/test-alert")
 async def trigger_test_alert(credentials: HTTPBasicCredentials = Depends(security)):
-    if not (
-        secrets.compare_digest(credentials.username, USERNAME) and
-        secrets.compare_digest(credentials.password, PASSWORD)
-    ):
+    # Check if credentials are configured
+    if not USERNAME or not PASSWORD:
+        return JSONResponse(status_code=503, content={"detail": "Admin authentication not configured"})
+
+    # Validate credentials - must use 'and' not 'or'
+    username_valid = secrets.compare_digest(credentials.username, USERNAME)
+    password_valid = secrets.compare_digest(credentials.password, PASSWORD)
+
+    if not (username_valid and password_valid):
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
-    pagerduty_key = PAGERDUTY_KEY
+    if not PAGERDUTY_KEY:
+        return JSONResponse(status_code=503, content={"detail": "PagerDuty not configured"})
+
     payload = {
-        "routing_key": pagerduty_key,
+        "routing_key": PAGERDUTY_KEY,
         "event_action": "trigger",
         "payload": {
             "summary": "🚨 Manual test alert triggered from FastAPI admin page",
@@ -944,7 +992,9 @@ async def trigger_test_alert(credentials: HTTPBasicCredentials = Depends(securit
     }
 
     try:
-        r = requests.post("https://events.pagerduty.com/v2/enqueue", json=payload, timeout=5)
-        return {"status": "sent", "response": r.status_code}
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post("https://events.pagerduty.com/v2/enqueue", json=payload)
+            return {"status": "sent", "response": r.status_code}
     except Exception as e:
+        logging.error(f"Failed to send PagerDuty alert: {e}")
         return {"status": "error", "message": str(e)}

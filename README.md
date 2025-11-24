@@ -15,17 +15,25 @@ This project exposes JSON metadata feeds via a FastAPI app and provides a simple
 ```bash
 # Install system dependencies (Ubuntu/Debian)
 sudo apt update
-sudo apt install -y python3 python3-pip redis-server
+sudo apt install -y python3 python3-pip python3-venv redis-server
 sudo systemctl enable --now redis-server
 
 # Clone and install
 git clone <REPO_URL>
 cd JSON_CHANGER
-pip3 install -r requirements.txt
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
 
 # Run the application
 uvicorn main:app
 ```
+
+**Note:** Remember to activate the virtual environment (`source venv/bin/activate`) each time you work with the project.
 
 The app will start on `http://localhost:8000`. Add `--reload` flag for development.
 

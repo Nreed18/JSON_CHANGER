@@ -1,0 +1,18 @@
+[Unit]
+Description=JSON Changer FastAPI Service
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/JSON_CHANGER
+Environment="PATH=/opt/JSON_CHANGER/venv/bin"
+EnvironmentFile=-/etc/json-changer/environment
+ExecStart=/opt/JSON_CHANGER/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

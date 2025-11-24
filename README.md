@@ -37,6 +37,55 @@ uvicorn main:app
 
 The app will start on `http://localhost:8000`. Add `--reload` flag for development.
 
+### Running as a Systemd Service (Production)
+
+To run the app automatically on boot and manage it as a system service:
+
+```bash
+# Move the project to a standard location
+sudo mv JSON_CHANGER /opt/
+cd /opt/JSON_CHANGER
+
+# Set up virtual environment with proper permissions
+sudo python3 -m venv venv
+sudo venv/bin/pip install -r requirements.txt
+sudo chown -R www-data:www-data /opt/JSON_CHANGER
+
+# Install and start the service
+sudo cp json-changer.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable json-changer
+sudo systemctl start json-changer
+
+# Check status
+sudo systemctl status json-changer
+```
+
+**Service management commands:**
+- `sudo systemctl start json-changer` - Start the service
+- `sudo systemctl stop json-changer` - Stop the service
+- `sudo systemctl restart json-changer` - Restart the service
+- `sudo systemctl status json-changer` - Check service status
+- `sudo journalctl -u json-changer -f` - View live logs
+
+**To set environment variables for the service:**
+
+```bash
+sudo mkdir -p /etc/json-changer
+sudo nano /etc/json-changer/environment
+```
+
+Add your variables in KEY=VALUE format:
+```
+PD_ROUTING_KEY=your_key_here
+ADMIN_USER=admin
+ADMIN_PASSWORD=your_password
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+Then restart: `sudo systemctl restart json-changer`
+
 ### Configuration
 
 Environment variables (all optional with defaults):
